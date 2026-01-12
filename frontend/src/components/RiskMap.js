@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON } from 'react-leaflet';
 import L from 'leaflet';
 import { fetchFarms, fetchEnrichedPredictions } from '../api';
 import 'leaflet/dist/leaflet.css';
@@ -22,7 +22,42 @@ const RiskMap = () => {
   const [loading, setLoading] = useState(true);
   const [mapView, setMapView] = useState('street'); // 'street' or 'satellite'
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [locationCache, setLocationCache] = useState({}); // Cache for geocoded locations
+  const locationCacheRef = useRef({}); // Cache for geocoded locations
+
+  // Reverse geocode coordinates to get location details
+  const reverseGeocode = useCallback(async (lat, lng, farmId) => {
+    const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    
+    // Check cache first
+    if (locationCacheRef.current[cacheKey]) {
+      return locationCacheRef.current[cacheKey];
+    }
+    
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
+      );
+      const data = await response.json();
+      
+      if (data.address) {
+        const locationData = {
+          sector: data.address.suburb || data.address.neighbourhood || data.address.quarter || 'Unknown',
+          cell: data.address.hamlet || data.address.isolated_dwelling || data.address.locality || 'Unknown',
+          village: data.address.village || data.address.town || data.address.city || 'Unknown',
+          fullAddress: data.display_name
+        };
+        
+        // Cache the result
+        locationCacheRef.current[cacheKey] = locationData;
+        
+        return locationData;
+      }
+    } catch (error) {
+      console.error('Reverse geocoding error:', error);
+    }
+    
+    return null;
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -51,9 +86,9 @@ const RiskMap = () => {
         }
       }
     }
-  }, [searchParams, farms]);
+  }, [searchParams, farms, reverseGeocode]);
 
-  const loadData = async () => {
+  async function loadData() {
     try {
       const [farmsData, predictionsData] = await Promise.all([
         fetchFarms(),
@@ -66,7 +101,7 @@ const RiskMap = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const getRiskLevel = (farmId) => {
     const farmPredictions = predictions.filter(p => p.farm_id === farmId);
@@ -106,46 +141,39 @@ const RiskMap = () => {
     return predictions.filter(p => p.farm_id === farmId);
   };
 
-  // Reverse geocode coordinates to get location details
-  const reverseGeocode = async (lat, lng, farmId) => {
-    const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-    
-    // Check cache first
-    if (locationCache[cacheKey]) {
-      return locationCache[cacheKey];
-    }
-    
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
-      );
-      const data = await response.json();
-      
-      if (data.address) {
-        const locationData = {
-          sector: data.address.suburb || data.address.neighbourhood || data.address.quarter || 'Unknown',
-          cell: data.address.hamlet || data.address.isolated_dwelling || data.address.locality || 'Unknown',
-          village: data.address.village || data.address.town || data.address.city || 'Unknown',
-          fullAddress: data.display_name
-        };
-        
-        // Cache the result
-        setLocationCache(prev => ({
-          ...prev,
-          [cacheKey]: locationData
-        }));
-        
-        return locationData;
+  const normalizeBoundaryGeoJson = (boundary) => {
+    if (!boundary) return null;
+
+    let geo = boundary;
+    if (typeof geo === 'string') {
+      try {
+        geo = JSON.parse(geo);
+      } catch {
+        return null;
       }
-    } catch (error) {
-      console.error('Reverse geocoding error:', error);
     }
-    
+
+    if (!geo || typeof geo !== 'object') return null;
+
+    // Accept Feature/FeatureCollection as-is.
+    if (geo.type === 'Feature' || geo.type === 'FeatureCollection') {
+      return geo;
+    }
+
+    // Accept Geometry objects by wrapping as a Feature.
+    if (typeof geo.type === 'string' && geo.coordinates) {
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: geo,
+      };
+    }
+
     return null;
   };
 
   // Get farm coordinates - use actual lat/lng or generate within Rwanda bounds
-  const getFarmCoordinates = (farm, index) => {
+  function getFarmCoordinates(farm, index) {
     // Rwanda actual bounds - tighter to avoid border areas
     // Using more conservative bounds that stay well within Rwanda's borders
     if (farm.latitude && farm.longitude) {
@@ -159,7 +187,7 @@ const RiskMap = () => {
     const lat = -2.5 + ((seed * 137.5) % 140) / 100; // -2.5 to -1.1 (core Rwanda)
     const lng = 29.0 + ((seed * 234.7) % 185) / 100; // 29.0 to 30.85 (core Rwanda)
     return [lat, lng];
-  };
+  }
 
   // Create custom marker icons based on risk level
   const createMarkerIcon = (riskLevel) => {
@@ -289,45 +317,63 @@ const RiskMap = () => {
               ? (farmPredictions.reduce((sum, p) => sum + (p.risk_score || 0), 0) / farmPredictions.length).toFixed(1)
               : 'N/A';
 
+            const boundary = normalizeBoundaryGeoJson(farm.boundary);
+
+            const handleSelectFarm = () => {
+              setSelectedFarm({
+                ...farm,
+                latitude: coordinates[0],
+                longitude: coordinates[1]
+              });
+            };
+
             return (
-              <Marker
-                key={farm.id}
-                position={coordinates}
-                icon={icon}
-                eventHandlers={{
-                  click: () => {
-                    setSelectedFarm({
-                      ...farm,
-                      latitude: coordinates[0],
-                      longitude: coordinates[1]
-                    });
-                  },
-                }}
-              >
-                <Popup>
-                  <div className="map-popup">
-                    <h3>{farm.name}</h3>
-                    <div className="popup-content">
-                      <p><strong>Location:</strong> {farm.location || 'N/A'}</p>
-                      <p><strong>Area:</strong> {farm.area || 'N/A'} ha</p>
-                      <p><strong>Coordinates:</strong> {farm.latitude && farm.longitude ? `${farm.latitude.toFixed(4)}, ${farm.longitude.toFixed(4)}` : `${coordinates[0].toFixed(4)}, ${coordinates[1].toFixed(4)}`}</p>
-                      <p><strong>Risk Level:</strong> <span className={`risk-badge-inline risk-${riskLevel}`}>{getRiskLabel(riskLevel)}</span></p>
-                      <p><strong>Average Risk:</strong> {avgRisk}%</p>
-                      <p><strong>Active Predictions:</strong> {farmPredictions.length}</p>
+              <React.Fragment key={farm.id}>
+                {boundary ? (
+                  <GeoJSON
+                    data={boundary}
+                    pathOptions={{
+                      color: getRiskColor(riskLevel),
+                      weight: selectedFarm?.id === farm.id ? 3 : 2,
+                      fillColor: getRiskColor(riskLevel),
+                      fillOpacity: 0.15,
+                    }}
+                    eventHandlers={{
+                      click: handleSelectFarm,
+                    }}
+                  />
+                ) : null}
+
+                <Marker
+                  position={coordinates}
+                  icon={icon}
+                  eventHandlers={{
+                    click: handleSelectFarm,
+                  }}
+                >
+                  <Popup>
+                    <div className="map-popup">
+                      <h3>{farm.name}</h3>
+                      <div className="popup-content">
+                        <p><strong>Crop Type:</strong> {farm.crop_type || 'Unknown'}</p>
+                        <p><strong>Location:</strong> {farm.location || 'N/A'}</p>
+                        <p><strong>Area:</strong> {farm.area || 'N/A'} ha</p>
+                        <p><strong>Coordinates:</strong> {farm.latitude && farm.longitude ? `${farm.latitude.toFixed(4)}, ${farm.longitude.toFixed(4)}` : `${coordinates[0].toFixed(4)}, ${coordinates[1].toFixed(4)}`}</p>
+                        <p><strong>Boundary:</strong> {boundary ? 'Available' : 'Not set'}</p>
+                        <p><strong>Risk Level:</strong> <span className={`risk-badge-inline risk-${riskLevel}`}>{getRiskLabel(riskLevel)}</span></p>
+                        <p><strong>Average Risk:</strong> {avgRisk}%</p>
+                        <p><strong>Active Predictions:</strong> {farmPredictions.length}</p>
+                      </div>
+                      <button 
+                        className="popup-details-btn"
+                        onClick={handleSelectFarm}
+                      >
+                        View Full Details →
+                      </button>
                     </div>
-                    <button 
-                      className="popup-details-btn"
-                      onClick={() => setSelectedFarm({
-                        ...farm,
-                        latitude: coordinates[0],
-                        longitude: coordinates[1]
-                      })}
-                    >
-                      View Full Details →
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
+                  </Popup>
+                </Marker>
+              </React.Fragment>
             );
           })}
         </MapContainer>
@@ -349,6 +395,10 @@ const RiskMap = () => {
               <div className="detail-section">
                 <h4>Farm Information</h4>
                 <div className="detail-row">
+                  <span className="detail-label">Crop Type:</span>
+                  <span className="detail-value">{selectedFarm.crop_type || 'Unknown'}</span>
+                </div>
+                <div className="detail-row">
                   <span className="detail-label">Location:</span>
                   <span className="detail-value">{selectedFarm.location || 'N/A'}</span>
                 </div>
@@ -363,10 +413,6 @@ const RiskMap = () => {
                       ? `${selectedFarm.latitude.toFixed(6)}, ${selectedFarm.longitude.toFixed(6)}`
                       : 'N/A'}
                   </span>
-                </div>
-                <div className="detail-row">
-                  <span className="detail-label">Owner ID:</span>
-                  <span className="detail-value">{selectedFarm.owner_id || 'N/A'}</span>
                 </div>
               </div>
 

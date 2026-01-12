@@ -7,6 +7,7 @@ import Predictions from '../pages/Predictions';
 import Alerts from '../pages/Alerts';
 import Users from '../pages/Users';
 import SatelliteImages from '../pages/SatelliteImages';
+import CropType from '../pages/CropType';
 import Diseases from '../pages/Diseases';
 import DiseaseForecasts from '../pages/DiseaseForecasts';
 import Weather from '../pages/Weather';
@@ -28,6 +29,7 @@ const MainContent = () => (
       <Route path="/data-status" element={<DataStatus />} />
       <Route path="/users" element={<Users />} />
       <Route path="/satellite-images" element={<SatelliteImages />} />
+      <Route path="/crop-type" element={<CropType />} />
     </Routes>
   </main>
 );

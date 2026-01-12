@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MainContent from './components/MainContent';
 import Login from './pages/Login';
+import { API_BASE } from './api';
 import { BrowserRouter as Router } from 'react-router-dom';
 
 
@@ -16,7 +17,7 @@ function App() {
   const handleLogin = async (username, password) => {
     setLoginError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/v1/auth/login', {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({

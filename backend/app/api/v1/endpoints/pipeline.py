@@ -8,9 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+from sqlalchemy import text
 
 from app.db.database import get_db
+from app.db.database import SessionLocal
 from app.services.pipeline_service import get_pipeline_service, PipelineService
+from app.models.prediction import Prediction as PredictionModel
+from app.models.farm import Farm as FarmModel
 
 router = APIRouter()
 
@@ -19,6 +23,12 @@ _pipeline_status = {
     'is_running': False,
     'last_run': None,
     'last_result': None
+}
+
+_risk_prediction_status = {
+    'is_running': False,
+    'last_run': None,
+    'last_result': None,
 }
 
 
@@ -75,6 +85,163 @@ def run_pipeline_task():
         }
     finally:
         _pipeline_status['is_running'] = False
+
+
+def _run_risk_prediction_task(overwrite: bool = False):
+    """Background task: create fresh Prediction rows from latest satellite NDVI per farm."""
+    global _risk_prediction_status
+    _risk_prediction_status['is_running'] = True
+    _risk_prediction_status['last_run'] = datetime.utcnow().isoformat()
+
+    db = SessionLocal()
+    try:
+        # Latest satellite record per farm (linked by extra_metadata.farm_id)
+        rows = db.execute(
+            text(
+                """
+                SELECT farm_id, ndvi, date
+                FROM (
+                    SELECT
+                        (extra_metadata->>'farm_id')::int AS farm_id,
+                        date,
+                        COALESCE(
+                            NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                            (extra_metadata->>'ndvi_mean')::float
+                        ) AS ndvi,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY (extra_metadata->>'farm_id')::int
+                            ORDER BY date DESC, id DESC
+                        ) AS rn
+                    FROM satellite_images
+                    WHERE (extra_metadata->>'farm_id') IS NOT NULL
+                ) t
+                WHERE rn = 1
+                """
+            )
+        ).fetchall()
+
+        latest_by_farm = {}
+        for r in rows:
+            if not r or r[0] is None:
+                continue
+            latest_by_farm[int(r[0])] = {
+                "ndvi": r[1],
+                "date": r[2],
+            }
+
+        if not latest_by_farm:
+            _risk_prediction_status['last_result'] = {
+                'status': 'no_data',
+                'message': 'No satellite images linked to farms found (extra_metadata.farm_id missing).'
+            }
+            return
+
+        farms = db.query(FarmModel).all()
+        now = datetime.utcnow()
+
+        has_any_weather = False
+        try:
+            has_any_weather = db.execute(text("SELECT 1 FROM weather_records LIMIT 1")).first() is not None
+        except Exception:
+            has_any_weather = False
+
+        created = 0
+        skipped = 0
+
+        for farm in farms:
+            sat = latest_by_farm.get(farm.id)
+            if not sat:
+                skipped += 1
+                continue
+
+            ndvi = sat.get('ndvi')
+            risk_score = _ndvi_to_risk_score(float(ndvi)) if ndvi is not None else 0.0
+
+            # Optional: if overwrite=True, remove existing latest prediction for farm.
+            if overwrite:
+                try:
+                    db.query(PredictionModel).filter(PredictionModel.farm_id == farm.id).delete()
+                except Exception:
+                    db.rollback()
+                    # If delete fails (FK constraints etc.), fall back to append-only behavior.
+
+            pred = PredictionModel(
+                farm_id=farm.id,
+                predicted_at=now,
+                risk_score=float(risk_score),
+                time_to_impact=_get_time_to_impact(float(risk_score)),
+            )
+
+            # Store some deterministic explainability fields so the UI can be fully "real".
+            try:
+                from app.api.v1.endpoints.analytics import (
+                    calculate_confidence,
+                    calculate_impact_metrics,
+                    default_risk_drivers,
+                )
+
+                confidence_level, confidence_score = calculate_confidence(
+                    float(risk_score),
+                    has_satellite_data=True,
+                    has_weather_data=has_any_weather,
+                )
+                pred.confidence_level = confidence_level
+                pred.confidence_score = confidence_score
+                pred.risk_drivers = default_risk_drivers(float(risk_score))
+                pred.impact_metrics = calculate_impact_metrics(float(risk_score), float(farm.area or 1.0))
+            except Exception:
+                # Best-effort only; prediction itself is still valid.
+                pass
+
+            db.add(pred)
+            created += 1
+
+        db.commit()
+
+        _risk_prediction_status['last_result'] = {
+            'status': 'completed',
+            'created_predictions': created,
+            'skipped_farms_without_satellite': skipped,
+            'predicted_at': now.isoformat(),
+        }
+    except Exception as e:
+        db.rollback()
+        _risk_prediction_status['last_result'] = {
+            'status': 'failed',
+            'error': str(e),
+        }
+    finally:
+        _risk_prediction_status['is_running'] = False
+        db.close()
+
+
+@router.get("/risk-predictions/status")
+def get_risk_prediction_status() -> Dict[str, Any]:
+    """Get current risk prediction job status."""
+    return {
+        'is_running': _risk_prediction_status['is_running'],
+        'last_run': _risk_prediction_status['last_run'],
+        'last_result': _risk_prediction_status['last_result'],
+    }
+
+
+@router.post("/risk-predictions/run")
+async def trigger_risk_predictions(background_tasks: BackgroundTasks, overwrite: bool = False) -> Dict[str, Any]:
+    """Create fresh risk predictions from latest satellite imagery (background job)."""
+    global _risk_prediction_status
+    if _risk_prediction_status['is_running']:
+        return {
+            'status': 'already_running',
+            'message': 'Risk prediction job is already running. Please check /pipeline/risk-predictions/status.',
+        }
+
+    background_tasks.add_task(_run_risk_prediction_task, overwrite)
+    return {
+        'status': 'started',
+        'message': 'Risk prediction job started. Check /pipeline/risk-predictions/status for progress.',
+        'started_at': datetime.utcnow().isoformat(),
+        'overwrite': overwrite,
+    }
 
 
 @router.get("/analytics/provinces")

@@ -37,6 +37,31 @@
   margin-bottom: var(--space-lg);
 }
 
+/* Form controls */
+label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.input {
+  width: 100%;
+  margin-top: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  font-size: 0.95rem;
+  color: var(--gray-800);
+  background: white;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
 /* Professional Table Styles */
 .data-table-container {
   background: white;

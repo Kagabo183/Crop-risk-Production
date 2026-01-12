@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  cropTypeLatestRun,
   fetchSatelliteImageCount,
+  fetchSatelliteImageStats,
   fetchFarms,
   fetchAlerts,
   fetchDashboardMetrics,
   fetchEnrichedPredictions,
   fetchRiskByDistrict,
   fetchRiskByProvince,
+  runRiskPredictions,
+  fetchRiskPredictionStatus,
 } from '../api';
 import { useNavigate } from 'react-router-dom';
 import './Dashboard.css';
@@ -105,7 +109,11 @@ const formatDriverName = (driver) => {
 const Dashboard = () => {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState('dashboard-overview');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+  const [latestCropTypeRun, setLatestCropTypeRun] = useState(null);
   const [satelliteCount, setSatelliteCount] = useState('--');
+  const [satelliteStats, setSatelliteStats] = useState(null);
   const [farmCount, setFarmCount] = useState('--');
   const [allFarms, setAllFarms] = useState([]);
   const [predictionCount, setPredictionCount] = useState('--');
@@ -123,98 +131,191 @@ const Dashboard = () => {
   const [geoView, setGeoView] = useState('district');
   const [selectedProvince, setSelectedProvince] = useState('');
   const [analyticsView, setAnalyticsView] = useState('hotspots');
+  const [isUpdatingRiskPredictions, setIsUpdatingRiskPredictions] = useState(false);
+  const [riskPredictionJobError, setRiskPredictionJobError] = useState(null);
+
+  const refreshDashboard = async () => {
+    setIsRefreshing(true);
+
+    const [satRes, satStatsRes, farmsRes, predsRes, metricsRes, alertsRes, provRes, distRes, cropRunRes] = await Promise.allSettled([
+      fetchSatelliteImageCount(),
+      fetchSatelliteImageStats(),
+      fetchFarms(),
+      fetchEnrichedPredictions(),
+      fetchDashboardMetrics(),
+      fetchAlerts(),
+      fetchRiskByProvince(),
+      fetchRiskByDistrict(),
+      cropTypeLatestRun(),
+    ]);
+
+    if (satRes.status === 'fulfilled') {
+      setSatelliteCount(satRes.value);
+    } else {
+      setSatelliteCount('Error');
+    }
+
+    if (satStatsRes.status === 'fulfilled') {
+      setSatelliteStats(satStatsRes.value);
+    } else {
+      setSatelliteStats(null);
+    }
+
+    if (farmsRes.status === 'fulfilled') {
+      const farms = farmsRes.value;
+      setAllFarms(Array.isArray(farms) ? farms : []);
+      setFarmCount(Array.isArray(farms) ? farms.length : 0);
+    } else {
+      setAllFarms([]);
+      setFarmCount('Error');
+    }
+
+    if (predsRes.status === 'fulfilled') {
+      const preds = Array.isArray(predsRes.value) ? predsRes.value : [];
+      setPredictionCount(preds.length);
+      setAllPredictions(preds);
+      setRecentPredictions(preds.slice(-10).reverse());
+    } else {
+      setPredictionCount('Error');
+      setRecentPredictions([]);
+    }
+
+    if (metricsRes.status === 'fulfilled') {
+      const metrics = metricsRes.value;
+      const high = metrics?.risk_distribution?.high ?? 0;
+      const medium = metrics?.risk_distribution?.medium ?? 0;
+      const low = metrics?.risk_distribution?.low ?? 0;
+      const providedTotal = metrics?.total_predictions ?? 0;
+      const derivedTotal = high + medium + low;
+      const totalPredictions = providedTotal > 0 ? providedTotal : derivedTotal;
+      const safeTotal = totalPredictions > 0 ? totalPredictions : 1;
+
+      const avgRiskScore = (high * 80 + medium * 45 + low * 15) / safeTotal;
+      const avgYieldLoss = (metrics?.national_impact?.yield_loss_tons ?? 0) / safeTotal;
+      const riskPercent = totalPredictions > 0 ? (high / totalPredictions) * 100 : 0;
+
+      setAnalytics({
+        avgRisk: avgRiskScore,
+        avgYieldLoss,
+        highRisk: high,
+        mediumRisk: medium,
+        lowRisk: low,
+        criticalDiseaseRisk: high,
+        riskPercentage: riskPercent,
+        totalPredictions,
+        latestPredictionAt: metrics?.effective_last_updated_at ?? metrics?.latest_prediction_at ?? null,
+        latestPredictionAtRaw: metrics?.latest_prediction_at ?? null,
+        latestSatelliteAt: metrics?.latest_satellite_at ?? null,
+        metricsSource: metrics?.metrics_source ?? null,
+        stalePredictions: Boolean(metrics?.stale_predictions),
+      });
+
+      setIntelligenceMetrics({
+        immediate: metrics?.time_to_impact?.immediate ?? 0,
+        shortTerm: metrics?.time_to_impact?.short_term ?? 0,
+        mediumTerm: metrics?.time_to_impact?.medium_term ?? 0,
+        stable: metrics?.time_to_impact?.stable ?? 0,
+        avgConfidence: metrics?.confidence?.average ?? 0,
+        highConfidence: metrics?.confidence?.high_confidence_count ?? 0,
+        totalEconomicLoss: metrics?.national_impact?.economic_loss_usd ?? 0,
+        totalYieldLoss: metrics?.national_impact?.yield_loss_tons ?? 0,
+        totalMealsLost: metrics?.national_impact?.meals_lost ?? 0,
+        topDrivers: (metrics?.top_risk_drivers ?? []).map((driver) => ({
+          name: driver.name,
+          count: driver.count,
+        })),
+      });
+    } else {
+      setAnalytics(null);
+      setIntelligenceMetrics(null);
+    }
+
+    if (alertsRes.status === 'fulfilled') {
+      const alerts = Array.isArray(alertsRes.value) ? alertsRes.value : [];
+      setAlertCount(alerts.length);
+      setRecentAlerts(alerts.slice(-10).reverse());
+    } else {
+      setAlertCount('Error');
+      setRecentAlerts([]);
+    }
+
+    if (provRes.status === 'fulfilled') {
+      setProvinceRiskData(Array.isArray(provRes.value) ? provRes.value : []);
+    } else {
+      setProvinceRiskData(null);
+    }
+
+    if (distRes.status === 'fulfilled') {
+      setDistrictRiskData(Array.isArray(distRes.value) ? distRes.value : []);
+    } else {
+      setDistrictRiskData(null);
+    }
+
+    if (cropRunRes.status === 'fulfilled') {
+      setLatestCropTypeRun(cropRunRes.value?.run || null);
+    } else {
+      // Optional endpoint: ignore if not available.
+      setLatestCropTypeRun(null);
+    }
+
+    setLastRefreshedAt(new Date().toISOString());
+    setIsRefreshing(false);
+  };
 
   useEffect(() => {
-    fetchSatelliteImageCount()
-      .then((count) => setSatelliteCount(count))
-      .catch(() => setSatelliteCount('Error'));
-
-    fetchFarms()
-      .then((farms) => {
-        setAllFarms(Array.isArray(farms) ? farms : []);
-        setFarmCount(Array.isArray(farms) ? farms.length : 0);
-      })
-      .catch(() => {
-        setAllFarms([]);
-        setFarmCount('Error');
-      });
-
-    fetchEnrichedPredictions()
-      .then((preds) => {
-        setPredictionCount(preds.length);
-        setAllPredictions(preds);
-        setRecentPredictions(preds.slice(-10).reverse());
-      })
-      .catch(() => {
-        setPredictionCount('Error');
-        setRecentPredictions([]);
-      });
-
-    fetchDashboardMetrics()
-      .then((metrics) => {
-        const high = metrics?.risk_distribution?.high ?? 0;
-        const medium = metrics?.risk_distribution?.medium ?? 0;
-        const low = metrics?.risk_distribution?.low ?? 0;
-        const providedTotal = metrics?.total_predictions ?? 0;
-        const derivedTotal = high + medium + low;
-        const totalPredictions = providedTotal > 0 ? providedTotal : derivedTotal;
-        const safeTotal = totalPredictions > 0 ? totalPredictions : 1;
-
-        const avgRiskScore = (high * 80 + medium * 45 + low * 15) / safeTotal;
-        const avgYieldLoss = (metrics?.national_impact?.yield_loss_tons ?? 0) / safeTotal;
-        const riskPercent = totalPredictions > 0 ? (high / totalPredictions) * 100 : 0;
-
-        setAnalytics({
-          avgRisk: avgRiskScore,
-          avgYieldLoss,
-          highRisk: high,
-          mediumRisk: medium,
-          lowRisk: low,
-          criticalDiseaseRisk: high,
-          riskPercentage: riskPercent,
-          totalPredictions,
-        });
-
-        setIntelligenceMetrics({
-          immediate: metrics?.time_to_impact?.immediate ?? 0,
-          shortTerm: metrics?.time_to_impact?.short_term ?? 0,
-          mediumTerm: metrics?.time_to_impact?.medium_term ?? 0,
-          stable: metrics?.time_to_impact?.stable ?? 0,
-          avgConfidence: metrics?.confidence?.average ?? 0,
-          highConfidence: metrics?.confidence?.high_confidence_count ?? 0,
-          totalEconomicLoss: metrics?.national_impact?.economic_loss_usd ?? 0,
-          totalYieldLoss: metrics?.national_impact?.yield_loss_tons ?? 0,
-          totalMealsLost: metrics?.national_impact?.meals_lost ?? 0,
-          topDrivers: (metrics?.top_risk_drivers ?? []).map((driver) => ({
-            name: driver.name,
-            count: driver.count,
-          })),
-        });
-      })
-      .catch(() => {
-        setAnalytics(null);
-        setIntelligenceMetrics(null);
-      });
-
-    fetchAlerts()
-      .then((alerts) => {
-        setAlertCount(alerts.length);
-        setRecentAlerts(alerts.slice(-10).reverse());
-      })
-      .catch(() => {
-        setAlertCount('Error');
-        setRecentAlerts([]);
-      });
-
-    // Geographic analytics (optional; falls back to local grouping)
-    fetchRiskByProvince()
-      .then((data) => setProvinceRiskData(Array.isArray(data) ? data : []))
-      .catch(() => setProvinceRiskData(null));
-
-    fetchRiskByDistrict()
-      .then((data) => setDistrictRiskData(Array.isArray(data) ? data : []))
-      .catch(() => setDistrictRiskData(null));
+    refreshDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!isUpdatingRiskPredictions) return;
+
+    let cancelled = false;
+    const startedAt = Date.now();
+    const timeoutMs = 2 * 60 * 1000;
+
+    const poll = async () => {
+      try {
+        const status = await fetchRiskPredictionStatus();
+        if (cancelled) return;
+        if (!status?.is_running) {
+          setIsUpdatingRiskPredictions(false);
+          setRiskPredictionJobError(null);
+          await refreshDashboard();
+          return;
+        }
+        if (Date.now() - startedAt > timeoutMs) {
+          setIsUpdatingRiskPredictions(false);
+          setRiskPredictionJobError('Timed out waiting for predictions job');
+          return;
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setIsUpdatingRiskPredictions(false);
+        setRiskPredictionJobError(e?.message || 'Failed to check predictions job status');
+      }
+    };
+
+    const interval = setInterval(poll, 2000);
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUpdatingRiskPredictions]);
+
+  const handleRunRiskPredictions = async () => {
+    setRiskPredictionJobError(null);
+    setIsUpdatingRiskPredictions(true);
+    try {
+      await runRiskPredictions({ overwrite: false });
+    } catch (e) {
+      setIsUpdatingRiskPredictions(false);
+      setRiskPredictionJobError(e?.message || 'Failed to start predictions job');
+    }
+  };
 
   const localGeoAnalytics = useMemo(() => {
     if (!Array.isArray(allFarms) || allFarms.length === 0) {
@@ -335,6 +436,31 @@ const Dashboard = () => {
     return formatDate(latest?.predicted_at);
   }, [allPredictions]);
 
+  const satelliteFreshnessLine = useMemo(() => {
+    if (!satelliteStats) return null;
+    const dbCount = satelliteStats?.db?.count;
+    const dbLatest = satelliteStats?.db?.latest_date;
+    const diskCounts = satelliteStats?.disk?.counts;
+    const diskLatest = satelliteStats?.disk?.latest_mtime;
+
+    const parts = [];
+    if (typeof dbCount === 'number') {
+      parts.push(`DB images: ${formatNumber(dbCount)}`);
+    }
+    if (dbLatest) {
+      parts.push(`DB latest: ${dbLatest}`);
+    }
+    if (diskCounts && (typeof diskCounts.sentinel2_real === 'number' || typeof diskCounts.sentinel2 === 'number')) {
+      const s2r = typeof diskCounts.sentinel2_real === 'number' ? formatNumber(diskCounts.sentinel2_real) : '--';
+      const s2 = typeof diskCounts.sentinel2 === 'number' ? formatNumber(diskCounts.sentinel2) : '--';
+      parts.push(`Disk images: sentinel2_real=${s2r}, sentinel2=${s2}`);
+    }
+    if (diskLatest && (diskLatest.sentinel2_real || diskLatest.sentinel2)) {
+      parts.push(`Disk latest: ${diskLatest.sentinel2_real || diskLatest.sentinel2}`);
+    }
+    return parts.length ? parts.join(' • ') : null;
+  }, [satelliteStats]);
+
   const totalPredictions = useMemo(() => {
     if (typeof predictionCount === 'number') {
       return predictionCount;
@@ -392,6 +518,43 @@ const Dashboard = () => {
       },
     ];
   }, [analytics]);
+
+  const cropTypeDistribution = useMemo(() => {
+    if (!Array.isArray(allFarms) || allFarms.length === 0) {
+      return [];
+    }
+
+    const counts = new Map();
+    for (const farm of allFarms) {
+      const raw = farm?.crop_type;
+      const crop = raw == null || String(raw).trim() === '' ? 'Unknown' : String(raw).trim();
+      counts.set(crop, (counts.get(crop) || 0) + 1);
+    }
+
+    const total = allFarms.length || 1;
+    const rows = Array.from(counts.entries())
+      .map(([crop, count]) => ({ crop, count, percentage: (count / total) * 100 }))
+      .sort((a, b) => b.count - a.count);
+
+    const top = rows.slice(0, 8);
+    const rest = rows.slice(8);
+    if (rest.length) {
+      const otherCount = rest.reduce((sum, r) => sum + r.count, 0);
+      top.push({ crop: 'Other', count: otherCount, percentage: (otherCount / total) * 100 });
+    }
+    return top;
+  }, [allFarms]);
+
+  const cropTypeSummary = useMemo(() => {
+    const total = Array.isArray(allFarms) ? allFarms.length : 0;
+    if (!total) return { total: 0, filled: 0, unknown: 0 };
+    let filled = 0;
+    for (const farm of allFarms) {
+      const v = farm?.crop_type;
+      if (v != null && String(v).trim() !== '') filled += 1;
+    }
+    return { total, filled, unknown: Math.max(0, total - filled) };
+  }, [allFarms]);
 
   const topDrivers = useMemo(() => (intelligenceMetrics?.topDrivers ?? []).slice(0, 4), [intelligenceMetrics]);
 
@@ -670,10 +833,27 @@ const Dashboard = () => {
         <div>
           <h1 className="dashboard-title">Crop Risk Dashboard</h1>
           <p className="dashboard-subtitle">Operational overview for Rwanda crop monitoring</p>
+          {satelliteFreshnessLine ? (
+            <p className="dashboard-subtitle" style={{ marginTop: 6 }}>
+              <strong>Data freshness:</strong> {satelliteFreshnessLine}
+            </p>
+          ) : null}
+          {analytics?.metricsSource === 'satellite' && analytics?.stalePredictions ? (
+            <p className="dashboard-subtitle" style={{ marginTop: 6 }}>
+              <strong>Note:</strong> Satellite data is newer than stored predictions; dashboard risk metrics are derived from the latest imagery.
+            </p>
+          ) : null}
+          {riskPredictionJobError ? (
+            <p className="dashboard-subtitle" style={{ marginTop: 6, color: '#b42318' }}>
+              <strong>Prediction update failed:</strong> {riskPredictionJobError}
+            </p>
+          ) : null}
           <div className="dashboard-meta">
             <div className="meta-pill">
-              <div className="meta-label">Last Run</div>
-              <div className="meta-value">{latestPredictionStamp || '--'}</div>
+              <div className="meta-label">
+                {analytics?.metricsSource === 'satellite' ? 'Last Satellite Update' : 'Last Prediction Run'}
+              </div>
+              <div className="meta-value">{analytics?.latestPredictionAt ? formatDate(analytics.latestPredictionAt) : (latestPredictionStamp || '--')}</div>
             </div>
             <div className="meta-pill">
               <div className="meta-label">Active Alerts</div>
@@ -691,9 +871,27 @@ const Dashboard = () => {
                   : `${formatNumber(avgConfidencePercent, { maximumFractionDigits: 0 })}%`}
               </div>
             </div>
+            <div className="meta-pill">
+              <div className="meta-label">Refreshed</div>
+              <div className="meta-value">{lastRefreshedAt ? formatDate(lastRefreshedAt) : '--'}</div>
+            </div>
           </div>
         </div>
         <div className="dashboard-controls">
+          <button type="button" className="btn-tertiary" onClick={refreshDashboard} disabled={isRefreshing}>
+            {isRefreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+          {analytics?.stalePredictions ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleRunRiskPredictions}
+              disabled={isRefreshing || isUpdatingRiskPredictions}
+              title="Generate fresh predictions from latest satellite imagery"
+            >
+              {isUpdatingRiskPredictions ? 'Updating predictions…' : 'Update Predictions'}
+            </button>
+          ) : null}
           <button type="button" className="btn-secondary" onClick={() => navigate('/predictions')}>
             View Predictions
           </button>
@@ -735,6 +933,12 @@ const Dashboard = () => {
               <div className="meta-pill">
                 <div className="meta-label">Farms</div>
                 <div className="meta-value">{formatCount(farmCount)}</div>
+              </div>
+              <div className="meta-pill">
+                <div className="meta-label">Crop Types</div>
+                <div className="meta-value">
+                  {cropTypeSummary.total ? `${formatNumber(cropTypeSummary.filled)}/${formatNumber(cropTypeSummary.total)}` : '--'}
+                </div>
               </div>
               <div className="meta-pill">
                 <div className="meta-label">Satellite Images</div>
@@ -1080,7 +1284,9 @@ const Dashboard = () => {
                 <div className="geo-chart">
                   <div className="geo-chart__title">Top Crops by Average Risk</div>
                   {topCrops.length === 0 ? (
-                    <div className="dashboard-empty-state">Crop type data is not available for farms yet.</div>
+                    <div className="dashboard-empty-state">
+                      No crop-level risk breakdown yet (this requires risk predictions). Crop types can still be viewed below.
+                    </div>
                   ) : (
                     <div className="bar-list">
                       {topCrops.map((row) => {
@@ -1125,6 +1331,45 @@ const Dashboard = () => {
                   )}
                 </div>
               </div>
+
+              <div className="section-header" style={{ marginTop: 18 }}>
+                <h3 className="section-title">Crop Type Distribution</h3>
+                <div className="section-meta">
+                  From farms.crop_type
+                  {latestCropTypeRun?.created_utc ? ` · last run ${formatDate(latestCropTypeRun.created_utc)}` : ''}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <button type="button" className="btn-primary" onClick={() => navigate('/crop-type')}
+                >
+                  Open Crop Type Tools
+                </button>
+                <button type="button" className="btn-tertiary" onClick={refreshDashboard} disabled={isRefreshing}>
+                  {isRefreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+
+              {cropTypeDistribution.length ? (
+                <div className="drivers-grid">
+                  {cropTypeDistribution.map((row) => (
+                    <div key={row.crop} className="driver-card">
+                      <div className="driver-card__label">{row.crop}</div>
+                      <div className="driver-card__value">{formatNumber(row.count)}</div>
+                      <div className="driver-card__meta">{row.percentage.toFixed(1)}% of farms</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="dashboard-empty-state">No crop_type values found in farms yet.</div>
+              )}
+
+              {latestCropTypeRun?.predictions_csv ? (
+                <div className="dashboard-empty-state" style={{ textAlign: 'left', marginTop: 12 }}>
+                  Latest crop-type run: <strong>{latestCropTypeRun.run_dir}</strong>
+                  <div style={{ opacity: 0.9, marginTop: 6 }}>Predictions: {latestCropTypeRun.predictions_csv}</div>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -1370,6 +1615,39 @@ const Dashboard = () => {
               </div>
             ))}
           </div>
+
+          <div className="section-header" style={{ marginTop: 24 }}>
+            <h2 className="section-title">Crop Type Distribution</h2>
+            <span className="section-meta">From farms.crop_type (refresh after recompute/apply)</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <button type="button" className="btn-primary" onClick={() => navigate('/crop-type')}>
+              Open Crop Type Tools
+            </button>
+            <button type="button" className="btn-tertiary" onClick={refreshDashboard} disabled={isRefreshing}>
+              {isRefreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {cropTypeDistribution.length ? (
+            <div className="drivers-grid">
+              {cropTypeDistribution.map((row) => (
+                <div key={row.crop} className="driver-card">
+                  <div className="driver-card__label">{row.crop}</div>
+                  <div className="driver-card__value">{formatNumber(row.count)}</div>
+                  <div className="driver-card__meta">{row.percentage.toFixed(1)}% of farms</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard-empty-state">No farms loaded yet.</div>
+          )}
+
+          {latestCropTypeRun?.predictions_csv ? (
+            <div className="dashboard-empty-state" style={{ textAlign: 'left', marginTop: 12 }}>
+              Latest crop-type run: <strong>{latestCropTypeRun.run_dir}</strong>
+              <div style={{ opacity: 0.9, marginTop: 6 }}>Predictions: {latestCropTypeRun.predictions_csv}</div>
+            </div>
+          ) : null}
         </section>
       )}
 

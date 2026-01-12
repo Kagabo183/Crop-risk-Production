@@ -1,14 +1,45 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Any, Dict, List, Optional
 import os
+from pathlib import Path
+from datetime import datetime
+from sqlalchemy import func
 from app.db.database import get_db
 from app.models.data import SatelliteImage
 from app.tasks.process_tasks import scan_and_enqueue
 from app.tasks.celery_app import celery_app
 
 router = APIRouter()
+
+
+def _count_disk_images(base_dir: Path) -> int:
+    if not base_dir.exists():
+        return 0
+    patterns = ("*.tif", "*.tiff", "*.jp2", "*.png", "*.jpg", "*.jpeg")
+    total = 0
+    for pat in patterns:
+        total += sum(1 for _ in base_dir.rglob(pat))
+    return total
+
+
+def _latest_mtime_iso(base_dir: Path) -> Optional[str]:
+    if not base_dir.exists():
+        return None
+    latest: Optional[float] = None
+    for p in base_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        try:
+            m = p.stat().st_mtime
+        except OSError:
+            continue
+        if latest is None or m > latest:
+            latest = m
+    if latest is None:
+        return None
+    return datetime.utcfromtimestamp(latest).isoformat() + "Z"
 
 @router.get("/", response_model=List[dict])
 def list_satellite_images(db: Session = Depends(get_db)):
@@ -24,6 +55,46 @@ def list_satellite_images(db: Session = Depends(get_db)):
         }
         for img in images
     ]
+
+
+@router.get("/count")
+def satellite_images_count(db: Session = Depends(get_db)) -> Dict[str, int]:
+    """Fast count of satellite image rows in the database."""
+    return {"count": int(db.query(func.count(SatelliteImage.id)).scalar() or 0)}
+
+
+@router.get("/stats")
+def satellite_images_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Return DB + disk stats so dashboards can reflect real current data."""
+    db_count = int(db.query(func.count(SatelliteImage.id)).scalar() or 0)
+    latest_date = db.query(func.max(SatelliteImage.date)).scalar() if db_count else None
+
+    # Container paths: compose mounts ./data -> /app/data
+    project_root = Path(os.getcwd())
+    data_dir = project_root / "data"
+    sentinel2_dir = data_dir / "sentinel2"
+    sentinel2_real_dir = data_dir / "sentinel2_real"
+
+    disk_counts = {
+        "sentinel2": _count_disk_images(sentinel2_dir),
+        "sentinel2_real": _count_disk_images(sentinel2_real_dir),
+    }
+
+    disk_latest = {
+        "sentinel2": _latest_mtime_iso(sentinel2_dir),
+        "sentinel2_real": _latest_mtime_iso(sentinel2_real_dir),
+    }
+
+    return {
+        "db": {
+            "count": db_count,
+            "latest_date": str(latest_date) if latest_date else None,
+        },
+        "disk": {
+            "counts": disk_counts,
+            "latest_mtime": disk_latest,
+        },
+    }
 
 @router.get("/download/{image_id}")
 def download_satellite_image(image_id: int, db: Session = Depends(get_db)):

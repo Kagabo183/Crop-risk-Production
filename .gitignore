@@ -47,6 +47,8 @@ data/raw/*
 data/processed/*
 data/sentinel2/*.tif
 data/sentinel2_real/
+data/earthengine/
+data/radiant/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/sentinel2/.gitkeep
@@ -85,3 +87,17 @@ app/ml/models/*.h5
 .pytest_cache/
 .coverage
 htmlcov/
+
+# ML (local artifacts + secrets)
+ml/models/
+ml/models*/
+ml/models_*/
+ml/runs/
+ml/*.csv
+ml/*.geojson
+ml/*service-account*.json
+ml/*service_account*.json
+ml/*key*.json
+
+# Notebooks (optional local exploration)
+notebooks/

@@ -1,11 +1,12 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any, Dict
 
 class FarmBase(BaseModel):
     name: str
     location: Optional[str] = None
     province: Optional[str] = None
     crop_type: Optional[str] = None
+    boundary: Optional[Dict[str, Any]] = None  # GeoJSON Polygon
     area: Optional[float] = None
     owner_id: Optional[int] = None
     latitude: Optional[float] = None
@@ -20,6 +21,7 @@ class FarmUpdate(BaseModel):
     location: Optional[str] = None
     province: Optional[str] = None
     crop_type: Optional[str] = None
+    boundary: Optional[Dict[str, Any]] = None  # GeoJSON Polygon
     area: Optional[float] = None
     owner_id: Optional[int] = None
     latitude: Optional[float] = None

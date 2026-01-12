@@ -1,9 +1,20 @@
+// Simple API utility for backend requests
+// Prefer env var (docker-compose sets REACT_APP_API_URL), fallback to localhost.
+export const API_BASE = (process.env.REACT_APP_API_URL || 'http://localhost:8000').replace(/\/$/, '') + '/api/v1';
 
 export async function fetchSatelliteImageCount() {
-  const res = await fetch(`${API_BASE}/satellite-images/?source=db`);
+  const res = await fetch(`${API_BASE}/satellite-images/count`);
   if (!res.ok) throw new Error('Failed to fetch satellite image count');
   const data = await res.json();
-  return data.length || 0;
+  return data?.count ?? 0;
+}
+
+export async function fetchSatelliteImageStats() {
+  const res = await fetch(`${API_BASE}/satellite-images/stats`, {
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch satellite image stats');
+  return res.json();
 }
 
 export async function fetchSatelliteImages(limit = 100) {
@@ -226,12 +237,82 @@ export async function updateFarm(farmId, patch) {
   }
   return res.json();
 }
-// Simple API utility for backend requests
-const API_BASE = 'http://localhost:8000/api/v1';
-
 function getAuthHeaders() {
   const token = localStorage.getItem('token');
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// ========== Crop Type (GEE + ML) ==========
+
+export async function cropTypeRecompute({
+  ee_project,
+  threshold = 0.6,
+  overwrite = false,
+  start = '2024-01-01',
+  end = '2024-12-31',
+  model_dir = 'ml/models_radiant_full'
+} = {}) {
+  const res = await fetch(`${API_BASE}/crop-type/recompute`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ ee_project, threshold, overwrite, start, end, model_dir }),
+  });
+
+  if (!res.ok) {
+    let detail = 'Failed to recompute crop types';
+    try {
+      const data = await res.json();
+      detail = data?.detail || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+
+  return res.json();
+}
+
+export async function cropTypeApply({ predictions_csv, threshold = 0.6, overwrite = false } = {}) {
+  const res = await fetch(`${API_BASE}/crop-type/apply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ predictions_csv, threshold, overwrite }),
+  });
+
+  if (!res.ok) {
+    let detail = 'Failed to apply crop type predictions';
+    try {
+      const data = await res.json();
+      detail = data?.detail || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+
+  return res.json();
+}
+
+export async function cropTypeRuns(limit = 20) {
+  const res = await fetch(`${API_BASE}/crop-type/runs?limit=${encodeURIComponent(limit)}`, {
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch crop-type runs');
+  return res.json();
+}
+
+export async function cropTypeLatestRun() {
+  const res = await fetch(`${API_BASE}/crop-type/runs/latest`, {
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch latest crop-type run');
+  return res.json();
 }
 
 export async function fetchFarms() {
@@ -273,6 +354,25 @@ export async function fetchRiskByDistrict() {
     headers: { ...getAuthHeaders() },
   });
   if (!res.ok) throw new Error('Failed to fetch district analytics');
+  return res.json();
+}
+
+export async function runRiskPredictions({ overwrite = false } = {}) {
+  const url = new URL(`${API_BASE}/pipeline/risk-predictions/run`, window.location.origin);
+  if (overwrite) url.searchParams.set('overwrite', 'true');
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to start risk prediction job');
+  return res.json();
+}
+
+export async function fetchRiskPredictionStatus() {
+  const res = await fetch(`${API_BASE}/pipeline/risk-predictions/status`, {
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to fetch risk prediction job status');
   return res.json();
 }
 

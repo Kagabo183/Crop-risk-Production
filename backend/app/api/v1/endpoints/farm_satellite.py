@@ -1,15 +1,19 @@
 """
 API endpoint to get the latest satellite data (NDVI) for each farm
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import List, Dict, Any
 from datetime import datetime
+from pathlib import Path
+
+from geoalchemy2.shape import to_shape
 
 from app.db.database import get_db
 from app.models.farm import Farm
 from app.models.data import SatelliteImage
+from app.services.pipeline_service import get_pipeline_service
 
 router = APIRouter()
 
@@ -105,3 +109,49 @@ def get_farm_ndvi_history(farm_id: int, limit: int = 30, db: Session = Depends(g
     # Sort chronologically
     history.reverse()
     return history
+
+
+@router.post("/recompute/{farm_id}")
+def recompute_farm_satellite(farm_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Recompute (refresh) a farm's satellite NDVI using existing downloaded NDVI tiles."""
+
+    farm = db.query(Farm).filter(Farm.id == farm_id).first()
+    if not farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+
+    # Ensure we have a point to sample from.
+    if getattr(farm, "latitude", None) is None or getattr(farm, "longitude", None) is None:
+        if getattr(farm, "boundary", None) is not None:
+            centroid = to_shape(farm.boundary).centroid
+            farm.latitude = float(centroid.y)
+            farm.longitude = float(centroid.x)
+            db.commit()
+            db.refresh(farm)
+        else:
+            raise HTTPException(status_code=422, detail="Farm must have either latitude/longitude or a boundary polygon")
+
+    pipeline = get_pipeline_service()
+    data_dir = Path("data/sentinel2_real")
+    if not data_dir.exists():
+        raise HTTPException(status_code=404, detail="No existing tile data found")
+
+    ndvi_files = list(data_dir.glob("ndvi_*.tif"))
+    if not ndvi_files:
+        raise HTTPException(status_code=404, detail="No NDVI files found")
+
+    total_affected = 0
+    tiles_processed: List[Dict[str, Any]] = []
+
+    for ndvi_path in ndvi_files:
+        tile = ndvi_path.stem.replace("ndvi_", "")
+        farm_data = pipeline.extract_ndvi_for_farms(ndvi_path, tile, farm_id=farm_id)
+        affected = pipeline.update_satellite_records(farm_data, tile)
+        total_affected += affected
+        tiles_processed.append({"tile": tile, "records_affected": affected})
+
+    return {
+        "status": "completed",
+        "farm_id": farm_id,
+        "tiles_processed": tiles_processed,
+        "total_records_affected": total_affected,
+    }

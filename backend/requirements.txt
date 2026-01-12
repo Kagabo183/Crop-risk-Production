@@ -37,6 +37,9 @@ geopandas==0.14.1
 shapely==2.0.2
 pyproj==3.6.1
 
+# Google Earth Engine (for crop-type feature extraction)
+earthengine-api==1.4.6
+
 # API calls for satellite/weather data
 httpx==0.25.2
 aiohttp==3.9.1

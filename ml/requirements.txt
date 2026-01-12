@@ -1,0 +1,13 @@
+# Minimal ML stack for crop-type MVP
+# Radiant MLHub labels (downloaded manually) + GEE feature extraction + RF training
+
+earthengine-api==1.4.6
+geemap==0.30.4
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.3.2
+joblib==1.3.2
+geopandas==0.14.1
+shapely==2.0.2
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9

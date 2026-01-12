@@ -19,10 +19,14 @@ import numpy as np
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from shapely import wkb
+from shapely.ops import transform as shapely_transform
+
 # Try importing rasterio, handle if not available
 try:
     import rasterio
     from rasterio.crs import CRS
+    from rasterio import features
     from pyproj import Transformer
     RASTERIO_AVAILABLE = True
 except ImportError:
@@ -52,7 +56,7 @@ class PipelineService:
     def __init__(self, db_url: str = None):
         self.db_url = db_url or os.environ.get(
             'DATABASE_URL', 
-            'postgresql://postgres:1234@localhost:5433/crop_risk_db'
+            'postgresql://postgres:1234@localhost:5434/crop_risk_db'
         )
         # Keep the pool conservative; this service may run in multiple processes (web + celery).
         self.engine = create_engine(
@@ -203,51 +207,140 @@ class PipelineService:
         print(f"✅ Saved NDVI: {ndvi_path}")
         return ndvi_path
     
-    def extract_ndvi_for_farms(self, ndvi_path: Path, tile: str) -> List[Dict]:
-        """Extract NDVI values for all farms from an NDVI file"""
+    def extract_ndvi_for_farms(self, ndvi_path: Path, tile: str, farm_id: int | None = None) -> List[Dict]:
+        """Extract NDVI values for farms from an NDVI file
+
+        If farm_id is provided, extracts for that farm only.
+        """
         if not RASTERIO_AVAILABLE:
             return []
         
         with self.engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT id, name, location, province, latitude, longitude FROM farms WHERE latitude IS NOT NULL"
-            ))
+            if farm_id is None:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT
+                            id,
+                            name,
+                            location,
+                            province,
+                            latitude,
+                            longitude,
+                            ST_AsBinary(boundary) AS boundary_wkb
+                        FROM farms
+                        WHERE latitude IS NOT NULL OR boundary IS NOT NULL
+                        """
+                    )
+                )
+            else:
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT
+                            id,
+                            name,
+                            location,
+                            province,
+                            latitude,
+                            longitude,
+                            ST_AsBinary(boundary) AS boundary_wkb
+                        FROM farms
+                        WHERE id = :farm_id AND (latitude IS NOT NULL OR boundary IS NOT NULL)
+                        """
+                    ),
+                    {"farm_id": farm_id},
+                )
             farms = [dict(row._mapping) for row in result]
         
         extracted = []
         
         with rasterio.open(ndvi_path) as src:
             transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+
+            def _mean_ndvi_for_polygon(polygon_wgs84) -> Optional[float]:
+                # Transform polygon from WGS84 to raster CRS
+                project = lambda x, y, z=None: transformer.transform(x, y)
+                polygon_projected = shapely_transform(project, polygon_wgs84)
+
+                try:
+                    window = features.geometry_window(src, [polygon_projected], pad_x=1, pad_y=1)
+                except Exception:
+                    return None
+
+                if window.width <= 0 or window.height <= 0:
+                    return None
+
+                data = src.read(1, window=window)
+                transform = src.window_transform(window)
+
+                mask = features.geometry_mask(
+                    [polygon_projected],
+                    out_shape=data.shape,
+                    transform=transform,
+                    invert=True,
+                    all_touched=True,
+                )
+
+                # Keep only pixels inside polygon
+                values = data[mask]
+                if values.size == 0:
+                    return None
+
+                # Filter invalid values
+                values = values.astype("float32")
+                values = values[~np.isnan(values)]
+                values = values[values != 0]
+                if values.size == 0:
+                    return None
+
+                return float(np.mean(values))
             
             for farm in farms:
                 try:
-                    x, y = transformer.transform(farm['longitude'], farm['latitude'])
-                    row, col = src.index(x, y)
-                    
-                    if 0 <= row < src.height and 0 <= col < src.width:
-                        ndvi_value = float(src.read(1)[row, col])
-                        
-                        if not np.isnan(ndvi_value) and ndvi_value != 0:
-                            extracted.append({
-                                'farm_id': farm['id'],
-                                'farm_name': farm['name'],
-                                'district': farm['location'],
-                                'province': farm['province'],
-                                'ndvi': ndvi_value,
-                                'tile': tile
-                            })
+                    ndvi_value: Optional[float] = None
+
+                    # Prefer polygon mean if available
+                    boundary_wkb = farm.get('boundary_wkb')
+                    if boundary_wkb:
+                        polygon = wkb.loads(bytes(boundary_wkb))
+                        if polygon is not None and polygon.geom_type == 'Polygon':
+                            ndvi_value = _mean_ndvi_for_polygon(polygon)
+
+                    # Fallback to point sampling
+                    if ndvi_value is None:
+                        if farm.get('longitude') is None or farm.get('latitude') is None:
+                            continue
+                        x, y = transformer.transform(farm['longitude'], farm['latitude'])
+                        row, col = src.index(x, y)
+
+                        if 0 <= row < src.height and 0 <= col < src.width:
+                            ndvi_value = float(src.read(1)[row, col])
+
+                    if ndvi_value is not None and not np.isnan(ndvi_value) and ndvi_value != 0:
+                        extracted.append({
+                            'farm_id': farm['id'],
+                            'farm_name': farm['name'],
+                            'district': farm['location'],
+                            'province': farm['province'],
+                            'ndvi': ndvi_value,
+                            'tile': tile
+                        })
                 except Exception as e:
                     continue
         
         return extracted
     
     def update_satellite_records(self, farm_data: List[Dict], tile: str, date: datetime = None) -> int:
-        """Insert or update satellite records for farms"""
+        """Insert or update satellite records for farms.
+
+        Returns the number of affected farm records (inserted + updated).
+        """
         if not farm_data:
             return 0
         
         date = date or datetime.now()
-        inserted = 0
+        affected = 0
         
         with self.engine.connect() as conn:
             for fd in farm_data:
@@ -270,25 +363,26 @@ class PipelineService:
                     # Update existing record
                     conn.execute(text("""
                         UPDATE satellite_images 
-                        SET date = :date, extra_metadata = :meta::jsonb
+                        SET date = :date, extra_metadata = CAST(:meta AS jsonb)
                         WHERE id = :id
                     """), {'date': date, 'meta': json.dumps(meta), 'id': existing[0]})
+                    affected += 1
                 else:
                     # Insert new record
                     conn.execute(text("""
                         INSERT INTO satellite_images (date, region, image_type, file_path, extra_metadata)
-                        VALUES (:date, :region, 'NDVI', :path, :meta::jsonb)
+                        VALUES (:date, :region, 'NDVI', :path, CAST(:meta AS jsonb))
                     """), {
                         'date': date,
                         'region': fd['district'] or 'Rwanda',
                         'path': str(self.data_dir / f"ndvi_{tile}.tif"),
                         'meta': json.dumps(meta)
                     })
-                    inserted += 1
+                    affected += 1
             
             conn.commit()
         
-        return inserted
+        return affected
     
     def run_full_pipeline(self, max_products: int = 5) -> Dict[str, Any]:
         """Run the full data fetching and processing pipeline"""
@@ -349,30 +443,42 @@ class PipelineService:
     def get_province_analytics(self) -> List[Dict]:
         """Get aggregated analytics by province"""
         with self.engine.connect() as conn:
-            result = conn.execute(text("""
-                SELECT 
-                    f.province,
-                    COUNT(DISTINCT f.id) as farm_count,
-                    COUNT(DISTINCT s.id) as satellite_records,
-                    AVG(COALESCE(
-                        NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                        (s.extra_metadata->>'ndvi_mean')::float
-                    )) as avg_ndvi,
-                    MIN(COALESCE(
-                        NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                        (s.extra_metadata->>'ndvi_mean')::float
-                    )) as min_ndvi,
-                    MAX(COALESCE(
-                        NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                        (s.extra_metadata->>'ndvi_mean')::float
-                    )) as max_ndvi,
-                    SUM(f.area) as total_area_ha
-                FROM farms f
-                LEFT JOIN satellite_images s ON (s.extra_metadata->>'farm_id')::int = f.id
-                WHERE f.province IS NOT NULL
-                GROUP BY f.province
-                ORDER BY f.province
-            """))
+            result = conn.execute(
+                text(
+                    """
+                    WITH latest_sat AS (
+                        SELECT DISTINCT ON (farm_id)
+                            farm_id,
+                            id,
+                            date,
+                            extra_metadata,
+                            COALESCE(
+                                NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                                (extra_metadata->>'ndvi_mean')::float
+                            ) AS ndvi
+                        FROM (
+                            SELECT s.*, (s.extra_metadata->>'farm_id')::int AS farm_id
+                            FROM satellite_images s
+                            WHERE (s.extra_metadata->>'farm_id') IS NOT NULL
+                        ) s
+                        ORDER BY farm_id, date DESC, id DESC
+                    )
+                    SELECT
+                        f.province,
+                        COUNT(DISTINCT f.id) as farm_count,
+                        COUNT(DISTINCT ls.id) as satellite_records,
+                        AVG(ls.ndvi) as avg_ndvi,
+                        MIN(ls.ndvi) as min_ndvi,
+                        MAX(ls.ndvi) as max_ndvi,
+                        SUM(f.area) as total_area_ha
+                    FROM farms f
+                    LEFT JOIN latest_sat ls ON ls.farm_id = f.id
+                    WHERE f.province IS NOT NULL
+                    GROUP BY f.province
+                    ORDER BY f.province
+                    """
+                )
+            )
             
             analytics = []
             for row in result:
@@ -394,26 +500,34 @@ class PipelineService:
     def get_district_analytics(self, province: str = None) -> List[Dict]:
         """Get aggregated analytics by district"""
         query = """
+            WITH latest_sat AS (
+                SELECT DISTINCT ON (farm_id)
+                    farm_id,
+                    id,
+                    date,
+                    extra_metadata,
+                    COALESCE(
+                        NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                        (extra_metadata->>'ndvi_mean')::float
+                    ) AS ndvi
+                FROM (
+                    SELECT s.*, (s.extra_metadata->>'farm_id')::int AS farm_id
+                    FROM satellite_images s
+                    WHERE (s.extra_metadata->>'farm_id') IS NOT NULL
+                ) s
+                ORDER BY farm_id, date DESC, id DESC
+            )
             SELECT 
                 f.province,
                 f.location as district,
                 COUNT(DISTINCT f.id) as farm_count,
-                COUNT(DISTINCT s.id) as satellite_records,
-                AVG(COALESCE(
-                    NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                    (s.extra_metadata->>'ndvi_mean')::float
-                )) as avg_ndvi,
-                MIN(COALESCE(
-                    NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                    (s.extra_metadata->>'ndvi_mean')::float
-                )) as min_ndvi,
-                MAX(COALESCE(
-                    NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                    (s.extra_metadata->>'ndvi_mean')::float
-                )) as max_ndvi,
+                COUNT(DISTINCT ls.id) as satellite_records,
+                AVG(ls.ndvi) as avg_ndvi,
+                MIN(ls.ndvi) as min_ndvi,
+                MAX(ls.ndvi) as max_ndvi,
                 SUM(f.area) as total_area_ha
             FROM farms f
-            LEFT JOIN satellite_images s ON (s.extra_metadata->>'farm_id')::int = f.id
+            LEFT JOIN latest_sat ls ON ls.farm_id = f.id
             WHERE f.location IS NOT NULL
         """
         
@@ -448,6 +562,23 @@ class PipelineService:
     def get_farm_analytics(self, province: str = None, district: str = None) -> List[Dict]:
         """Get individual farm analytics"""
         query = """
+            WITH latest_sat AS (
+                SELECT DISTINCT ON (farm_id)
+                    farm_id,
+                    id,
+                    date,
+                    COALESCE(
+                        NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                        (extra_metadata->>'ndvi_mean')::float
+                    ) AS ndvi,
+                    extra_metadata->>'tile' AS tile
+                FROM (
+                    SELECT s.*, (s.extra_metadata->>'farm_id')::int AS farm_id
+                    FROM satellite_images s
+                    WHERE (s.extra_metadata->>'farm_id') IS NOT NULL
+                ) s
+                ORDER BY farm_id, date DESC, id DESC
+            )
             SELECT 
                 f.id,
                 f.name,
@@ -456,14 +587,11 @@ class PipelineService:
                 f.area,
                 f.latitude,
                 f.longitude,
-                COALESCE(
-                    NULLIF((s.extra_metadata->>'ndvi_value')::float, 0),
-                    (s.extra_metadata->>'ndvi_mean')::float
-                ) as ndvi,
-                s.extra_metadata->>'tile' as tile,
-                s.date as last_update
+                ls.ndvi as ndvi,
+                ls.tile as tile,
+                ls.date as last_update
             FROM farms f
-            LEFT JOIN satellite_images s ON (s.extra_metadata->>'farm_id')::int = f.id
+            LEFT JOIN latest_sat ls ON ls.farm_id = f.id
             WHERE 1=1
         """
         

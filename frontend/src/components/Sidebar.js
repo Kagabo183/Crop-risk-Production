@@ -19,6 +19,7 @@ const Sidebar = () => (
         <li><NavLink to="/data-status" className={({ isActive }) => isActive ? 'active' : ''}>Data Status</NavLink></li>
         <li><NavLink to="/users" className={({ isActive }) => isActive ? 'active' : ''}>Users</NavLink></li>
         <li><NavLink to="/satellite-images" className={({ isActive }) => isActive ? 'active' : ''}>Satellite Images</NavLink></li>
+        <li><NavLink to="/crop-type" className={({ isActive }) => isActive ? 'active' : ''}>Crop Type</NavLink></li>
       </ul>
     </nav>
   </aside>

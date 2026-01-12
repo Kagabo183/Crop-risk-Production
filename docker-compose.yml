@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:14
+    image: postgis/postgis:14-3.4
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -8,9 +8,10 @@ services:
       POSTGRES_DB: crop_risk_db
     command: ["-c", "max_connections=200"]
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./backend/docker/db-init:/docker-entrypoint-initdb.d:ro
 
   web:
     build: ./backend
@@ -28,6 +29,8 @@ services:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
+      - ./ml:/app/ml:cached
+      - ./data/earthengine:/root/.config/earthengine:cached
 
   redis:
     image: redis:7
@@ -46,6 +49,8 @@ services:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
+      - ./ml:/app/ml:cached
+      - ./data/earthengine:/root/.config/earthengine:cached
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - REDIS_URL=redis
@@ -62,6 +67,8 @@ services:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
+      - ./ml:/app/ml:cached
+      - ./data/earthengine:/root/.config/earthengine:cached
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - REDIS_URL=redis

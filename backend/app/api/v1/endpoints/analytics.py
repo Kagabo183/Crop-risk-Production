@@ -1,16 +1,75 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func
 from typing import Dict, List, Any
 from datetime import datetime, timedelta
 from app.db.database import get_db
 from app.models.prediction import Prediction as PredictionModel
 from app.models.alert import Alert as AlertModel
 from app.models.farm import Farm as FarmModel
-from app.models.data import SatelliteImage
-import random
+from app.models.data import SatelliteImage, WeatherRecord
+from sqlalchemy import text
 
 router = APIRouter()
+
+
+def _ndvi_to_risk_score(ndvi: float) -> float:
+    """Convert NDVI to risk score (0-100, higher = more risk)."""
+    if ndvi is None:
+        return 0.0
+    try:
+        value = float(ndvi)
+    except Exception:
+        return 0.0
+
+    if value >= 0.7:
+        return 10.0
+    elif value >= 0.6:
+        return 25.0
+    elif value >= 0.5:
+        return 40.0
+    elif value >= 0.4:
+        return 55.0
+    elif value >= 0.3:
+        return 70.0
+    elif value >= 0.2:
+        return 85.0
+    else:
+        return 95.0
+
+
+def _latest_satellite_per_farm(db: Session) -> List[Dict[str, Any]]:
+    """Return latest satellite NDVI per farm using extra_metadata.farm_id linkage."""
+    rows = db.execute(
+        text(
+            """
+            SELECT farm_id, ndvi, date
+            FROM (
+                SELECT
+                    (extra_metadata->>'farm_id')::int AS farm_id,
+                    date,
+                    COALESCE(
+                        NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                        (extra_metadata->>'ndvi_mean')::float
+                    ) AS ndvi,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY (extra_metadata->>'farm_id')::int
+                        ORDER BY date DESC, id DESC
+                    ) AS rn
+                FROM satellite_images
+                WHERE (extra_metadata->>'farm_id') IS NOT NULL
+            ) t
+            WHERE rn = 1
+            """
+        )
+    ).fetchall()
+
+    latest = []
+    for r in rows:
+        if not r or r[0] is None:
+            continue
+        latest.append({"farm_id": int(r[0]), "ndvi": r[1], "date": r[2]})
+    return latest
 
 def calculate_time_to_impact(risk_score: float) -> str:
     """Calculate time to impact based on risk score"""
@@ -24,29 +83,30 @@ def calculate_time_to_impact(risk_score: float) -> str:
         return "> 30 days (Stable)"
 
 def calculate_confidence(risk_score: float, has_satellite_data: bool = True, has_weather_data: bool = True) -> tuple:
-    """Calculate confidence level and score"""
-    base_confidence = 70.0
-    
-    # Adjust based on data availability
+    """Deterministic confidence estimate when a prediction doesn't store it.
+
+    If you want "real" confidence, store it on the Prediction row during inference.
+    """
+    base_confidence = 55.0
+
     if has_satellite_data:
-        base_confidence += 15
+        base_confidence += 20.0
     if has_weather_data:
-        base_confidence += 10
-    
-    # Add some variance based on risk score (extreme values are harder to predict)
+        base_confidence += 10.0
+
+    # Mid-range risk tends to be more stable.
     if 40 <= risk_score <= 60:
-        base_confidence += 5  # Mid-range predictions are more confident
-    
-    # Add realistic variance
-    confidence_score = min(95.0, base_confidence + random.uniform(-5, 5))
-    
+        base_confidence += 5.0
+
+    confidence_score = max(0.0, min(95.0, base_confidence))
+
     if confidence_score >= 80:
         confidence_level = "High"
     elif confidence_score >= 60:
         confidence_level = "Medium"
     else:
         confidence_level = "Low"
-    
+
     return confidence_level, round(confidence_score, 1)
 
 def calculate_impact_metrics(risk_score: float, farm_area_ha: float = 1.0) -> Dict[str, float]:
@@ -67,36 +127,92 @@ def calculate_impact_metrics(risk_score: float, farm_area_ha: float = 1.0) -> Di
         "affected_area_ha": round(farm_area_ha * yield_loss_percent, 2)
     }
 
-def generate_risk_drivers(risk_score: float) -> Dict[str, float]:
-    """Generate risk drivers based on risk score"""
-    drivers = {}
-    
+def default_risk_drivers(risk_score: float) -> Dict[str, float]:
+    """Deterministic fallback drivers when a prediction doesn't store drivers."""
     if risk_score >= 60:
-        drivers["High Temperature Stress"] = round(random.uniform(0.2, 0.4), 2)
-        drivers["Rainfall Deficit"] = round(random.uniform(0.2, 0.3), 2)
-        drivers["NDVI Decline"] = round(random.uniform(0.15, 0.25), 2)
-        drivers["Disease Pressure"] = round(random.uniform(0.1, 0.2), 2)
-    elif risk_score >= 40:
-        drivers["Moderate Heat Stress"] = round(random.uniform(0.15, 0.3), 2)
-        drivers["Irregular Rainfall"] = round(random.uniform(0.15, 0.25), 2)
-        drivers["Vegetation Stress"] = round(random.uniform(0.1, 0.2), 2)
-    else:
-        drivers["Normal Conditions"] = 0.8
-        drivers["Seasonal Variation"] = 0.2
-    
-    return drivers
+        return {
+            "ndvi_trend": 0.35,
+            "rainfall_deficit": 0.25,
+            "heat_stress_days": 0.25,
+            "disease_pressure": 0.15,
+        }
+    if risk_score >= 30:
+        return {
+            "ndvi_anomaly": 0.4,
+            "rainfall_deficit": 0.3,
+            "heat_stress_days": 0.3,
+        }
+    return {"seasonal_variation": 1.0}
+
+
+def _latest_predictions_per_farm(db: Session) -> List[PredictionModel]:
+    subq = (
+        db.query(
+            PredictionModel.farm_id.label("farm_id"),
+            func.max(PredictionModel.predicted_at).label("max_predicted_at"),
+        )
+        .group_by(PredictionModel.farm_id)
+        .subquery()
+    )
+    return (
+        db.query(PredictionModel)
+        .join(
+            subq,
+            (PredictionModel.farm_id == subq.c.farm_id)
+            & (PredictionModel.predicted_at == subq.c.max_predicted_at),
+        )
+        .all()
+    )
 
 @router.get("/dashboard-metrics")
 def get_dashboard_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get comprehensive dashboard analytics with intelligence metrics"""
+
+    # Dashboard should represent the *current state*. If predictions are older than
+    # the most recent satellite imagery, derive the dashboard metrics from satellite.
+    predictions = _latest_predictions_per_farm(db)
+
+    latest_predicted_at = None
+    try:
+        latest_predicted_at = max((p.predicted_at for p in predictions if p.predicted_at), default=None)
+    except Exception:
+        latest_predicted_at = None
+
+    latest_predicted_day = None
+    try:
+        latest_predicted_day = latest_predicted_at.date() if latest_predicted_at else None
+    except Exception:
+        latest_predicted_day = None
+
+    latest_satellite_at = None
+    try:
+        latest_satellite_at = db.execute(
+            text("SELECT MAX(date) FROM satellite_images WHERE (extra_metadata->>'farm_id') IS NOT NULL")
+        ).scalar()
+    except Exception:
+        latest_satellite_at = None
+
+    use_satellite = bool(
+        latest_satellite_at
+        and (
+            (latest_predicted_at is None)
+            or (latest_predicted_day and latest_predicted_day < latest_satellite_at)
+        )
+    )
+
+    satellite_latest = _latest_satellite_per_farm(db) if use_satellite else []
+    if use_satellite and not satellite_latest:
+        use_satellite = False
     
-    # Get all predictions
-    predictions = db.query(PredictionModel).all()
-    
-    if not predictions:
+    if (not predictions) and (not satellite_latest):
         # Return zeros if no data
         return {
             "total_predictions": 0,
+            "metrics_source": None,
+            "latest_prediction_at": None,
+            "latest_satellite_at": latest_satellite_at.isoformat() if latest_satellite_at else None,
+            "effective_last_updated_at": latest_satellite_at.isoformat() if latest_satellite_at else None,
+            "stale_predictions": bool(latest_satellite_at and latest_predicted_day and latest_predicted_day < latest_satellite_at),
             "time_to_impact": {
                 "immediate": 0,
                 "short_term": 0,
@@ -137,59 +253,149 @@ def get_dashboard_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
     medium_risk_count = 0
     low_risk_count = 0
     
-    risk_drivers_counter = {}
+    risk_drivers_counter: Dict[str, int] = {}
     
     # Get farm areas for impact calculation
     farm_areas = {farm.id: farm.area or 1.0 for farm in db.query(FarmModel).all()}
     
-    for pred in predictions:
-        risk_score = pred.risk_score
-        farm_area = farm_areas.get(pred.farm_id, 1.0)
-        
-        # Time to impact
-        time_to_impact = calculate_time_to_impact(risk_score)
-        if "< 7" in time_to_impact:
-            immediate_count += 1
-        elif "7-14" in time_to_impact:
-            short_term_count += 1
-        elif "14-30" in time_to_impact:
-            medium_term_count += 1
-        else:
-            stable_count += 1
-        
-        # Confidence
-        confidence_level, confidence_score = calculate_confidence(risk_score)
-        total_confidence += confidence_score
-        if confidence_level == "High":
-            high_confidence_count += 1
-        
-        # Impact metrics
-        impact = calculate_impact_metrics(risk_score, farm_area)
-        total_economic_loss += impact["economic_loss_usd"]
-        total_yield_loss += impact["yield_loss_tons"]
-        total_meals_lost += impact["meals_lost"]
-        
-        # Risk distribution
-        if risk_score >= 60:
-            high_risk_count += 1
-        elif risk_score >= 30:
-            medium_risk_count += 1
-        else:
-            low_risk_count += 1
-        
-        # Risk drivers
-        drivers = generate_risk_drivers(risk_score)
-        for driver, contribution in drivers.items():
-            risk_drivers_counter[driver] = risk_drivers_counter.get(driver, 0) + 1
+    # Determine basic data availability flags once.
+    has_any_weather = db.query(func.count(WeatherRecord.id)).scalar() not in (None, 0)
+
+    # Get list of farms that have at least one satellite image linked via extra_metadata.farm_id
+    farms_with_satellite = set()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT (extra_metadata->>'farm_id')::int AS farm_id
+                FROM satellite_images
+                WHERE (extra_metadata->>'farm_id') IS NOT NULL
+                """
+            )
+        ).fetchall()
+        farms_with_satellite = {int(r[0]) for r in rows if r and r[0] is not None}
+    except Exception:
+        farms_with_satellite = set()
+
+    metrics_source = "satellite" if use_satellite else "predictions"
+    effective_last_updated_at = latest_satellite_at if use_satellite else latest_predicted_at
+
+    if use_satellite:
+        for row in satellite_latest:
+            farm_id = int(row["farm_id"])
+            risk_score = _ndvi_to_risk_score(row.get("ndvi"))
+            farm_area = farm_areas.get(farm_id, 1.0)
+
+            # Time to impact
+            time_to_impact = calculate_time_to_impact(risk_score)
+            if "< 7" in time_to_impact:
+                immediate_count += 1
+            elif "7-14" in time_to_impact:
+                short_term_count += 1
+            elif "14-30" in time_to_impact:
+                medium_term_count += 1
+            else:
+                stable_count += 1
+
+            # Confidence (derived)
+            confidence_level, confidence_score = calculate_confidence(
+                risk_score,
+                has_satellite_data=True,
+                has_weather_data=has_any_weather,
+            )
+
+            total_confidence += confidence_score
+            if confidence_level.lower() == "high":
+                high_confidence_count += 1
+
+            # Impact metrics
+            impact = calculate_impact_metrics(risk_score, farm_area)
+            total_economic_loss += impact["economic_loss_usd"]
+            total_yield_loss += impact["yield_loss_tons"]
+            total_meals_lost += impact["meals_lost"]
+
+            # Risk distribution
+            if risk_score >= 60:
+                high_risk_count += 1
+            elif risk_score >= 30:
+                medium_risk_count += 1
+            else:
+                low_risk_count += 1
+
+            # Risk drivers (derived)
+            drivers = default_risk_drivers(risk_score)
+            for driver in drivers.keys():
+                risk_drivers_counter[driver] = risk_drivers_counter.get(driver, 0) + 1
+
+    else:
+        for pred in predictions:
+            risk_score = float(pred.risk_score or 0)
+            farm_area = farm_areas.get(pred.farm_id, 1.0)
+
+            # Time to impact
+            time_to_impact = calculate_time_to_impact(risk_score)
+            if "< 7" in time_to_impact:
+                immediate_count += 1
+            elif "7-14" in time_to_impact:
+                short_term_count += 1
+            elif "14-30" in time_to_impact:
+                medium_term_count += 1
+            else:
+                stable_count += 1
+
+            # Confidence (prefer persisted values)
+            if pred.confidence_score is not None and pred.confidence_level:
+                confidence_score = float(pred.confidence_score)
+                confidence_level = str(pred.confidence_level)
+            else:
+                has_sat = pred.farm_id in farms_with_satellite
+                confidence_level, confidence_score = calculate_confidence(
+                    risk_score,
+                    has_satellite_data=has_sat,
+                    has_weather_data=has_any_weather,
+                )
+
+            total_confidence += confidence_score
+            if confidence_level.lower() == "high":
+                high_confidence_count += 1
+
+            # Impact metrics
+            impact = calculate_impact_metrics(risk_score, farm_area)
+            total_economic_loss += impact["economic_loss_usd"]
+            total_yield_loss += impact["yield_loss_tons"]
+            total_meals_lost += impact["meals_lost"]
+
+            # Risk distribution
+            if risk_score >= 60:
+                high_risk_count += 1
+            elif risk_score >= 30:
+                medium_risk_count += 1
+            else:
+                low_risk_count += 1
+
+            # Risk drivers (prefer persisted drivers)
+            drivers = (
+                pred.risk_drivers
+                if isinstance(pred.risk_drivers, dict) and pred.risk_drivers
+                else default_risk_drivers(risk_score)
+            )
+            for driver in drivers.keys():
+                risk_drivers_counter[driver] = risk_drivers_counter.get(driver, 0) + 1
     
     # Calculate averages
-    avg_confidence = total_confidence / len(predictions) if predictions else 0
+    denom = len(satellite_latest) if use_satellite else len(predictions)
+    avg_confidence = total_confidence / denom if denom else 0
     
     # Top risk drivers
     top_drivers = sorted(risk_drivers_counter.items(), key=lambda x: x[1], reverse=True)[:3]
     
     return {
-        "total_predictions": len(predictions),
+        "total_predictions": denom,
+        "metrics_source": metrics_source,
+        "latest_prediction_at": latest_predicted_at.isoformat() if latest_predicted_at else None,
+        "latest_satellite_at": latest_satellite_at.isoformat() if latest_satellite_at else None,
+        "effective_last_updated_at": effective_last_updated_at.isoformat() if effective_last_updated_at else None,
+        "stale_predictions": bool(latest_satellite_at and latest_predicted_day and latest_predicted_day < latest_satellite_at),
         "time_to_impact": {
             "immediate": immediate_count,
             "short_term": short_term_count,
@@ -216,14 +422,42 @@ def get_dashboard_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
 @router.get("/predictions-enriched")
 def get_enriched_predictions(db: Session = Depends(get_db)):
     """Get predictions with calculated intelligence metrics"""
-    
-    predictions = db.query(PredictionModel).all()
+
+    predictions = _latest_predictions_per_farm(db)
     farm_areas = {farm.id: farm.area or 1.0 for farm in db.query(FarmModel).all()}
+
+    has_any_weather = db.query(func.count(WeatherRecord.id)).scalar() not in (None, 0)
+    farms_with_satellite = set()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT (extra_metadata->>'farm_id')::int AS farm_id
+                FROM satellite_images
+                WHERE (extra_metadata->>'farm_id') IS NOT NULL
+                """
+            )
+        ).fetchall()
+        farms_with_satellite = {int(r[0]) for r in rows if r and r[0] is not None}
+    except Exception:
+        farms_with_satellite = set()
     
     enriched = []
     for pred in predictions:
         farm_area = farm_areas.get(pred.farm_id, 1.0)
-        confidence_level, confidence_score = calculate_confidence(pred.risk_score)
+
+        risk_score = float(pred.risk_score or 0)
+        time_to_impact = pred.time_to_impact or calculate_time_to_impact(risk_score)
+
+        if pred.confidence_score is not None and pred.confidence_level:
+            confidence_level = str(pred.confidence_level)
+            confidence_score = float(pred.confidence_score)
+        else:
+            has_sat = pred.farm_id in farms_with_satellite
+            confidence_level, confidence_score = calculate_confidence(risk_score, has_satellite_data=has_sat, has_weather_data=has_any_weather)
+
+        drivers = pred.risk_drivers if isinstance(pred.risk_drivers, dict) and pred.risk_drivers else default_risk_drivers(risk_score)
+        impact = pred.impact_metrics if isinstance(pred.impact_metrics, dict) and pred.impact_metrics else calculate_impact_metrics(risk_score, farm_area)
         
         enriched.append({
             "id": pred.id,
@@ -232,11 +466,11 @@ def get_enriched_predictions(db: Session = Depends(get_db)):
             "yield_loss": pred.yield_loss,
             "disease_risk": pred.disease_risk,
             "predicted_at": pred.predicted_at.isoformat() if pred.predicted_at else None,
-            "time_to_impact": calculate_time_to_impact(pred.risk_score),
+            "time_to_impact": time_to_impact,
             "confidence_level": confidence_level,
             "confidence_score": confidence_score,
-            "risk_drivers": generate_risk_drivers(pred.risk_score),
-            "impact_metrics": calculate_impact_metrics(pred.risk_score, farm_area)
+            "risk_drivers": drivers,
+            "impact_metrics": impact,
         })
     
     return enriched
