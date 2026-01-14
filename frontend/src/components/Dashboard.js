@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cropTypeLatestRun,
   fetchSatelliteImageCount,
@@ -111,6 +111,7 @@ const Dashboard = () => {
   const [activeSection, setActiveSection] = useState('dashboard-overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [latestCropTypeRun, setLatestCropTypeRun] = useState(null);
   const [satelliteCount, setSatelliteCount] = useState('--');
   const [satelliteStats, setSatelliteStats] = useState(null);
@@ -134,20 +135,27 @@ const Dashboard = () => {
   const [isUpdatingRiskPredictions, setIsUpdatingRiskPredictions] = useState(false);
   const [riskPredictionJobError, setRiskPredictionJobError] = useState(null);
 
-  const refreshDashboard = async () => {
+  const isRefreshingRef = useRef(false);
+  const lastAutoRefreshAtRef = useRef(0);
+
+  const refreshDashboard = useCallback(async () => {
+    if (isRefreshingRef.current) return;
+
+    isRefreshingRef.current = true;
     setIsRefreshing(true);
 
-    const [satRes, satStatsRes, farmsRes, predsRes, metricsRes, alertsRes, provRes, distRes, cropRunRes] = await Promise.allSettled([
-      fetchSatelliteImageCount(),
-      fetchSatelliteImageStats(),
-      fetchFarms(),
-      fetchEnrichedPredictions(),
-      fetchDashboardMetrics(),
-      fetchAlerts(),
-      fetchRiskByProvince(),
-      fetchRiskByDistrict(),
-      cropTypeLatestRun(),
-    ]);
+    try {
+      const [satRes, satStatsRes, farmsRes, predsRes, metricsRes, alertsRes, provRes, distRes, cropRunRes] = await Promise.allSettled([
+        fetchSatelliteImageCount(),
+        fetchSatelliteImageStats(),
+        fetchFarms(),
+        fetchEnrichedPredictions(),
+        fetchDashboardMetrics(),
+        fetchAlerts(),
+        fetchRiskByProvince(),
+        fetchRiskByDistrict(),
+        cropTypeLatestRun(),
+      ]);
 
     if (satRes.status === 'fulfilled') {
       setSatelliteCount(satRes.value);
@@ -258,14 +266,37 @@ const Dashboard = () => {
       setLatestCropTypeRun(null);
     }
 
-    setLastRefreshedAt(new Date().toISOString());
-    setIsRefreshing(false);
-  };
+      setLastRefreshedAt(new Date().toISOString());
+    } finally {
+      isRefreshingRef.current = false;
+      setIsRefreshing(false);
+      setHasLoadedOnce(true);
+    }
+  }, []);
 
   useEffect(() => {
     refreshDashboard();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshDashboard]);
+
+  useEffect(() => {
+    const throttleMs = 45 * 1000;
+
+    const maybeRefreshOnWake = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      if (now - lastAutoRefreshAtRef.current < throttleMs) return;
+      lastAutoRefreshAtRef.current = now;
+      refreshDashboard();
+    };
+
+    window.addEventListener('focus', maybeRefreshOnWake);
+    document.addEventListener('visibilitychange', maybeRefreshOnWake);
+
+    return () => {
+      window.removeEventListener('focus', maybeRefreshOnWake);
+      document.removeEventListener('visibilitychange', maybeRefreshOnWake);
+    };
+  }, [refreshDashboard]);
 
   useEffect(() => {
     if (!isUpdatingRiskPredictions) return;
@@ -598,7 +629,7 @@ const Dashboard = () => {
   };
 
   const handleViewMap = (farmId) => {
-    navigate(`/risk-map?farmId=${farmId}`);
+    navigate(`/risk-map?farmId=${farmId}&focus=1`);
   };
 
   const avgConfidencePercent = useMemo(() => {
@@ -1500,7 +1531,18 @@ const Dashboard = () => {
 
       {activeSection === 'dashboard-analytics' && !analytics && (
         <div className="dashboard-empty-state">
-          Analytics data is not available yet. Please refresh after metrics load.
+          {isRefreshing || !hasLoadedOnce ? (
+            <>Loading analytics…</>
+          ) : (
+            <>Analytics data is not available right now.</>
+          )}
+          {!isRefreshing ? (
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="btn-tertiary" onClick={refreshDashboard}>
+                Refresh
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1565,7 +1607,18 @@ const Dashboard = () => {
 
       {activeSection === 'dashboard-intelligence' && !intelligenceMetrics && (
         <div className="dashboard-empty-state">
-          Intelligence metrics are not available yet. Please refresh after metrics load.
+          {isRefreshing || !hasLoadedOnce ? (
+            <>Loading intelligence metrics…</>
+          ) : (
+            <>Intelligence metrics are not available right now.</>
+          )}
+          {!isRefreshing ? (
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="btn-tertiary" onClick={refreshDashboard}>
+                Refresh
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1653,7 +1706,18 @@ const Dashboard = () => {
 
       {activeSection === 'dashboard-distribution' && !analytics && (
         <div className="dashboard-empty-state">
-          Distribution data is not available yet. Please refresh after metrics load.
+          {isRefreshing || !hasLoadedOnce ? (
+            <>Loading distribution…</>
+          ) : (
+            <>Distribution data is not available right now.</>
+          )}
+          {!isRefreshing ? (
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="btn-tertiary" onClick={refreshDashboard}>
+                Refresh
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1696,7 +1760,19 @@ const Dashboard = () => {
                       onClick={() => handleRowToggle(prediction.id, prediction.farm_id)}
                     >
                       <td>
-                        <div className="table-primary">Farm #{prediction.farm_id}</div>
+                        <div className="table-primary">
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleViewMap(prediction.farm_id);
+                            }}
+                            title="Open focused view on the map"
+                          >
+                            Farm #{prediction.farm_id}
+                          </button>
+                        </div>
                         <div className="table-secondary">{formatDate(prediction.predicted_at)}</div>
                       </td>
                       <td>

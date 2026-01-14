@@ -423,8 +423,113 @@ def get_dashboard_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
 def get_enriched_predictions(db: Session = Depends(get_db)):
     """Get predictions with calculated intelligence metrics"""
 
+    # "Soft" data-quality checks to keep results trustworthy.
+    # Sentinel-2 captures everything (cities/lakes/etc). We only get "farm" values
+    # by sampling pixels at a farm point or within a farm polygon. If the farm has
+    # missing/incorrect geometry, NDVI can reflect non-farm land cover.
+
+    RWANDA_BBOX = {
+        "min_lon": 28.8,
+        "max_lon": 30.9,
+        "min_lat": -2.9,
+        "max_lat": -1.0,
+    }
+
+    def _in_rwanda_bounds(lat: float, lon: float) -> bool:
+        return (
+            RWANDA_BBOX["min_lat"] <= lat <= RWANDA_BBOX["max_lat"]
+            and RWANDA_BBOX["min_lon"] <= lon <= RWANDA_BBOX["max_lon"]
+        )
+
+    def _compute_quality_flags(*, farm: FarmModel, ndvi_series: list[dict]) -> list[str]:
+        flags: list[str] = []
+
+        has_boundary = getattr(farm, "boundary", None) is not None
+        lat = getattr(farm, "latitude", None)
+        lon = getattr(farm, "longitude", None)
+
+        if (lat is None or lon is None) and not has_boundary:
+            flags.append("missing_farm_geometry")
+        elif lat is not None and lon is not None:
+            try:
+                if not _in_rwanda_bounds(float(lat), float(lon)):
+                    flags.append("farm_out_of_rwanda_bounds")
+            except Exception:
+                flags.append("invalid_farm_coordinates")
+
+        if not ndvi_series:
+            flags.append("no_satellite_ndvi")
+            return flags
+
+        # ndvi_series is ordered most-recent-first
+        try:
+            latest_ndvi = float(ndvi_series[0]["ndvi"])
+        except Exception:
+            flags.append("invalid_satellite_ndvi")
+            return flags
+
+        # Very low NDVI often indicates water/urban/bare soil; can be real during off-season,
+        # but should be reviewed if persistent.
+        if latest_ndvi <= 0.05:
+            flags.append("ndvi_suspicious_low")
+        if latest_ndvi >= 0.95:
+            flags.append("ndvi_suspicious_high")
+
+        if len(ndvi_series) >= 2:
+            try:
+                prev_ndvi = float(ndvi_series[1]["ndvi"])
+                if abs(latest_ndvi - prev_ndvi) >= 0.40:
+                    flags.append("ndvi_unstable")
+            except Exception:
+                pass
+
+        return flags
+
     predictions = _latest_predictions_per_farm(db)
-    farm_areas = {farm.id: farm.area or 1.0 for farm in db.query(FarmModel).all()}
+
+    farms = db.query(FarmModel).all()
+    farms_by_id = {f.id: f for f in farms}
+    farm_areas = {farm.id: farm.area or 1.0 for farm in farms}
+
+    # Pull up to 5 most recent NDVI values per farm from satellite_images (linked by extra_metadata.farm_id)
+    ndvi_by_farm: dict[int, list[dict]] = {}
+    try:
+        rows = db.execute(
+            text(
+                """
+                WITH s AS (
+                    SELECT
+                        (extra_metadata->>'farm_id')::int AS farm_id,
+                        date,
+                        COALESCE(
+                            NULLIF((extra_metadata->>'ndvi_value')::float, 0),
+                            (extra_metadata->>'ndvi_mean')::float
+                        ) AS ndvi,
+                        row_number() OVER (
+                            PARTITION BY (extra_metadata->>'farm_id')::int
+                            ORDER BY date DESC NULLS LAST, id DESC
+                        ) AS rn
+                    FROM satellite_images
+                    WHERE (extra_metadata->>'farm_id') IS NOT NULL
+                )
+                SELECT farm_id, date, ndvi
+                FROM s
+                WHERE rn <= 5 AND ndvi IS NOT NULL
+                ORDER BY farm_id, rn
+                """
+            )
+        ).fetchall()
+
+        for r in rows:
+            farm_id = int(r[0])
+            ndvi_by_farm.setdefault(farm_id, []).append(
+                {
+                    "date": r[1].isoformat() if r[1] else None,
+                    "ndvi": float(r[2]) if r[2] is not None else None,
+                }
+            )
+    except Exception:
+        ndvi_by_farm = {}
 
     has_any_weather = db.query(func.count(WeatherRecord.id)).scalar() not in (None, 0)
     farms_with_satellite = set()
@@ -445,6 +550,9 @@ def get_enriched_predictions(db: Session = Depends(get_db)):
     enriched = []
     for pred in predictions:
         farm_area = farm_areas.get(pred.farm_id, 1.0)
+        farm = farms_by_id.get(pred.farm_id)
+        ndvi_series = ndvi_by_farm.get(int(pred.farm_id), []) if pred.farm_id is not None else []
+        quality_flags = _compute_quality_flags(farm=farm, ndvi_series=ndvi_series) if farm else ["missing_farm_record"]
 
         risk_score = float(pred.risk_score or 0)
         time_to_impact = pred.time_to_impact or calculate_time_to_impact(risk_score)
@@ -471,6 +579,12 @@ def get_enriched_predictions(db: Session = Depends(get_db)):
             "confidence_score": confidence_score,
             "risk_drivers": drivers,
             "impact_metrics": impact,
+            "latest_ndvi": (ndvi_series[0]["ndvi"] if ndvi_series else None),
+            "latest_ndvi_date": (ndvi_series[0]["date"] if ndvi_series else None),
+            "data_quality": {
+                "flags": quality_flags,
+                "has_warnings": bool(quality_flags),
+            },
         })
     
     return enriched

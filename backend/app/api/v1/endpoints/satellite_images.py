@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import func
 from app.db.database import get_db
 from app.models.data import SatelliteImage
-from app.tasks.process_tasks import scan_and_enqueue
+from app.tasks.process_tasks import process_image_task, scan_and_enqueue
 from app.tasks.celery_app import celery_app
 
 router = APIRouter()
@@ -41,20 +41,87 @@ def _latest_mtime_iso(base_dir: Path) -> Optional[str]:
         return None
     return datetime.utcfromtimestamp(latest).isoformat() + "Z"
 
+
+def _resolve_file_path(file_path: str) -> Path:
+    p = Path(file_path)
+    if p.is_absolute():
+        return p
+    # Assume relative to project root
+    return Path(os.getcwd()) / file_path.lstrip("/\\")
+
+
+def _coerce_meta(meta: Any) -> Dict[str, Any]:
+    if meta is None:
+        return {}
+    if isinstance(meta, dict):
+        return meta
+    if isinstance(meta, str):
+        try:
+            import json
+
+            loaded = json.loads(meta)
+            return loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_mean_ndvi(meta: Dict[str, Any]) -> Optional[float]:
+    # Best-effort across different ingestion paths
+    for key in ("mean_ndvi", "ndvi_value", "mean", "ndvi"):
+        v = meta.get(key)
+        try:
+            if v is None:
+                continue
+            return float(v)
+        except Exception:
+            continue
+    return None
+
 @router.get("/", response_model=List[dict])
-def list_satellite_images(db: Session = Depends(get_db)):
-    images = db.query(SatelliteImage).all()
-    return [
-        {
-            "id": img.id,
-            "date": img.date,
-            "region": img.region,
-            "image_type": img.image_type,
-            "file_path": img.file_path,
-            "extra_metadata": img.extra_metadata
-        }
-        for img in images
-    ]
+def list_satellite_images(
+    db: Session = Depends(get_db),
+    limit: int = Query(1000, ge=1, le=5000),
+):
+    images = (
+        db.query(SatelliteImage)
+        .order_by(SatelliteImage.date.desc(), SatelliteImage.id.desc())
+        .limit(limit)
+        .all()
+    )
+    out: List[dict] = []
+    for img in images:
+        meta = _coerce_meta(img.extra_metadata)
+        mean = _extract_mean_ndvi(meta)
+        # keep compatibility: if we know mean, ensure it's present in extra_metadata
+        if mean is not None and meta.get("mean_ndvi") is None:
+            meta = {**meta, "mean_ndvi": mean}
+
+        fp = _resolve_file_path(img.file_path)
+        file_exists = fp.exists()
+
+        missing_reason: Optional[str] = None
+        if (img.image_type or "").upper() != "NDVI":
+            missing_reason = "not_ndvi"
+        elif mean is None and not file_exists:
+            missing_reason = "file_missing"
+        elif mean is None:
+            missing_reason = "not_processed"
+
+        out.append(
+            {
+                "id": img.id,
+                "date": img.date,
+                "region": img.region,
+                "image_type": img.image_type,
+                "file_path": img.file_path,
+                "file_exists": file_exists,
+                "mean_ndvi": mean,
+                "missing_reason": missing_reason,
+                "extra_metadata": meta,
+            }
+        )
+    return out
 
 
 @router.get("/count")
@@ -111,7 +178,11 @@ def download_satellite_image(image_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/ndvi-means")
-def get_ndvi_means(source: str = 'db', db: Session = Depends(get_db)):
+def get_ndvi_means(
+    source: str = 'db',
+    db: Session = Depends(get_db),
+    limit: int = Query(1000, ge=1, le=5000),
+):
     """Return NDVI mean values.
 
     - `source=db` (default): read from `satellite_images.extra_metadata.mean_ndvi`.
@@ -132,25 +203,28 @@ def get_ndvi_means(source: str = 'db', db: Session = Depends(get_db)):
             })
         return results
 
-    # default: read from DB
-    images = db.query(SatelliteImage).all()
+    # default: read from DB (only include rows that actually have a mean)
+    images = (
+        db.query(SatelliteImage)
+        .filter(func.upper(SatelliteImage.image_type) == 'NDVI')
+        .order_by(SatelliteImage.date.desc(), SatelliteImage.id.desc())
+        .limit(limit)
+        .all()
+    )
     for img in images:
-        meta = img.extra_metadata or {}
-        # meta may be a JSON string depending on DB driver
-        if isinstance(meta, str):
-            try:
-                import json
-                meta = json.loads(meta)
-            except Exception:
-                meta = {}
-        mean = None
-        if isinstance(meta, dict):
-            mean = meta.get('mean_ndvi')
-        results.append({
-            'id': img.id,
-            'file_path': img.file_path,
-            'mean_ndvi': mean
-        })
+        meta = _coerce_meta(img.extra_metadata)
+        mean = _extract_mean_ndvi(meta)
+        if mean is None:
+            continue
+        results.append(
+            {
+                'id': img.id,
+                'date': img.date,
+                'region': img.region,
+                'file_path': img.file_path,
+                'mean_ndvi': mean,
+            }
+        )
     return results
 
 
@@ -173,6 +247,53 @@ def trigger_scan():
                 detail='Celery broker (Redis) unavailable. Ensure Redis is running and REDIS_HOST or REDIS_URL env var points to localhost when running locally.'
             )
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@router.post('/process-missing-ndvi-means')
+def process_missing_ndvi_means(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Enqueue NDVI mean computation only for images that need it.
+
+    Rules:
+    - Only considers NDVI rows
+    - Only enqueues when the referenced file exists on disk
+    - Skips rows that already have a mean_ndvi recorded
+    """
+    images = (
+        db.query(SatelliteImage)
+        .filter(func.upper(SatelliteImage.image_type) == 'NDVI')
+        .order_by(SatelliteImage.date.desc(), SatelliteImage.id.desc())
+        .all()
+    )
+
+    enqueued = 0
+    skipped_missing_file = 0
+    skipped_already_processed = 0
+    task_ids: List[str] = []
+
+    for img in images:
+        meta = _coerce_meta(img.extra_metadata)
+        mean = _extract_mean_ndvi(meta)
+        if mean is not None:
+            skipped_already_processed += 1
+            continue
+
+        fp = _resolve_file_path(img.file_path)
+        if not fp.exists():
+            skipped_missing_file += 1
+            continue
+
+        # Pass stored file_path string (usually relative like data/...)
+        # so the task can update the existing DB row by matching file_path.
+        res = process_image_task.delay(img.file_path, str(img.date), img.region)
+        task_ids.append(res.id)
+        enqueued += 1
+
+    return {
+        'enqueued': enqueued,
+        'skipped_missing_file': skipped_missing_file,
+        'skipped_already_processed': skipped_already_processed,
+        'task_ids': task_ids,
+    }
 
 
 @router.get('/task/{task_id}')

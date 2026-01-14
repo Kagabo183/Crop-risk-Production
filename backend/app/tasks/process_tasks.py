@@ -129,7 +129,7 @@ def scan_and_enqueue(self, data_dir: str = 'data/sentinel2'):
     if not p.exists():
         return {'enqueued': []}
 
-    tif_files = list(p.glob('*.tif'))
+    tif_files = list(p.rglob('*.tif')) + list(p.rglob('*.tiff'))
     seen = set()
 
     db_url = os.environ.get('DATABASE_URL')

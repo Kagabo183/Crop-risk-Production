@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchSatelliteImages, fetchNDVIMeans, triggerScan } from '../api';
+import { fetchSatelliteImages, fetchNDVIMeans, processMissingNDVIMeans, triggerScan } from '../api';
 
 const SatelliteImages = () => {
   const [images, setImages] = useState([]);
@@ -9,6 +9,8 @@ const SatelliteImages = () => {
   const [scanning, setScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 'table' or 'ndvi'
+
+  const [processingMissing, setProcessingMissing] = useState(false);
 
   const loadData = () => {
     setLoading(true);
@@ -46,6 +48,26 @@ const SatelliteImages = () => {
     } catch (err) {
       setScanStatus(`Error: ${err.message}`);
       setScanning(false);
+    }
+  };
+
+  const handleProcessMissingMeans = async () => {
+    setProcessingMissing(true);
+    setScanStatus('Enqueuing missing NDVI mean computations...');
+    try {
+      const result = await processMissingNDVIMeans();
+      setScanStatus(
+        `Enqueued ${result.enqueued} NDVI file(s). ` +
+          `Skipped: ${result.skipped_already_processed} already processed, ${result.skipped_missing_file} missing file.`
+      );
+      // Reload after a short delay to let workers update extra_metadata
+      setTimeout(() => {
+        loadData();
+        setProcessingMissing(false);
+      }, 6000);
+    } catch (err) {
+      setScanStatus(`Error: ${err.message}`);
+      setProcessingMissing(false);
     }
   };
 
@@ -95,6 +117,23 @@ const SatelliteImages = () => {
           >
             {scanning ? '⏳ Scanning...' : '🔄 Scan & Process'}
           </button>
+
+          <button
+            onClick={handleProcessMissingMeans}
+            disabled={processingMissing}
+            style={{
+              padding: '8px 16px',
+              background: processingMissing ? '#cbd5e0' : '#3182ce',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: processingMissing ? 'not-allowed' : 'pointer',
+              fontWeight: 'bold'
+            }}
+            title="Compute mean NDVI only for NDVI rows that have files on disk but are missing mean values"
+          >
+            {processingMissing ? '⏳ Processing...' : '🧮 Process missing NDVI means'}
+          </button>
         </div>
       </div>
 
@@ -122,7 +161,7 @@ const SatelliteImages = () => {
                 <th style={{padding: 8, textAlign: 'left'}}>Date</th>
                 <th style={{padding: 8, textAlign: 'left'}}>Region</th>
                 <th style={{padding: 8, textAlign: 'left'}}>Type</th>
-                <th style={{padding: 8, textAlign: 'left'}}>Mean NDVI</th>
+                <th style={{padding: 8, textAlign: 'left'}}>Mean NDVI (NDVI only)</th>
                 <th style={{padding: 8, textAlign: 'left'}}>Cloud Cover (%)</th>
                 <th style={{padding: 8, textAlign: 'left'}}>File</th>
               </tr>
@@ -137,18 +176,24 @@ const SatelliteImages = () => {
                   <td style={{padding: 8}}>{img.region || '-'}</td>
                   <td style={{padding: 8}}>{img.image_type || '-'}</td>
                   <td style={{padding: 8}}>
-                    {img.extra_metadata && img.extra_metadata.mean_ndvi != null ? (
+                    {String(img.image_type || '').toUpperCase() !== 'NDVI' ? (
+                      <span style={{ color: '#718096' }}>N/A</span>
+                    ) : (img.mean_ndvi != null || (img.extra_metadata && img.extra_metadata.mean_ndvi != null)) ? (
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: 4,
-                        background: img.extra_metadata.mean_ndvi > 0.6 ? '#c6f6d5' :
-                                    img.extra_metadata.mean_ndvi > 0.3 ? '#feebc8' : '#fed7d7',
-                        color: img.extra_metadata.mean_ndvi > 0.6 ? '#22543d' :
-                               img.extra_metadata.mean_ndvi > 0.3 ? '#7c2d12' : '#c53030'
+                        background: (img.mean_ndvi ?? img.extra_metadata.mean_ndvi) > 0.6 ? '#c6f6d5' :
+                                    (img.mean_ndvi ?? img.extra_metadata.mean_ndvi) > 0.3 ? '#feebc8' : '#fed7d7',
+                        color: (img.mean_ndvi ?? img.extra_metadata.mean_ndvi) > 0.6 ? '#22543d' :
+                               (img.mean_ndvi ?? img.extra_metadata.mean_ndvi) > 0.3 ? '#7c2d12' : '#c53030'
                       }}>
-                        {img.extra_metadata.mean_ndvi.toFixed(3)}
+                        {(img.mean_ndvi ?? img.extra_metadata.mean_ndvi).toFixed(3)}
                       </span>
-                    ) : '-'}
+                    ) : img.file_exists === false ? (
+                      <span style={{ color: '#c53030', fontWeight: 'bold' }}>Missing file</span>
+                    ) : (
+                      <span style={{ color: '#b7791f', fontWeight: 'bold' }}>Not processed</span>
+                    )}
                   </td>
                   <td style={{padding: 8}}>{img.extra_metadata && img.extra_metadata.cloud_cover != null ? img.extra_metadata.cloud_cover : '-'}</td>
                   <td style={{padding: 8}}>
@@ -217,7 +262,7 @@ const SatelliteImages = () => {
             </thead>
             <tbody>
               {ndviData.length === 0 && (
-                <tr><td colSpan={5} style={{padding: 8}}>No NDVI data found. Click "Scan & Process" to start processing.</td></tr>
+                <tr><td colSpan={5} style={{padding: 8}}>No processed NDVI means found yet. Click "🧮 Process missing NDVI means" (recommended) or "Scan & Process".</td></tr>
               )}
               {ndviData.map((item, idx) => {
                 const health = item.mean_ndvi > 0.6 ? 'Healthy' :

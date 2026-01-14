@@ -38,6 +38,15 @@ export async function triggerScan() {
   return res.json();
 }
 
+export async function processMissingNDVIMeans() {
+  const res = await fetch(`${API_BASE}/satellite-images/process-missing-ndvi-means`, {
+    method: 'POST',
+    headers: { ...getAuthHeaders() },
+  });
+  if (!res.ok) throw new Error('Failed to process missing NDVI means');
+  return res.json();
+}
+
 export async function getTaskStatus(taskId) {
   const res = await fetch(`${API_BASE}/satellite-images/task/${taskId}`);
   if (!res.ok) throw new Error('Failed to fetch task status');
@@ -320,6 +329,30 @@ export async function fetchFarms() {
     headers: { ...getAuthHeaders() }
   });
   if (!res.ok) throw new Error('Failed to fetch farms');
+  return res.json();
+}
+
+export async function updateFarmBoundary(farmId, boundary) {
+  const res = await fetch(`${API_BASE}/farms/${encodeURIComponent(farmId)}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ boundary }),
+  });
+
+  if (!res.ok) {
+    let detail = 'Failed to update farm boundary';
+    try {
+      const data = await res.json();
+      detail = data?.detail || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+
   return res.json();
 }
 
