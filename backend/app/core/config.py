@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Database
-    DATABASE_URL: str
+    # Default supports basic imports/tests without env vars.
+    # Production should override via environment variables.
+    DATABASE_URL: str = "sqlite:///./app.db"
     DATABASE_HOST: Optional[str] = None
     DATABASE_PORT: Optional[int] = None
     DATABASE_NAME: Optional[str] = None
@@ -21,7 +23,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = None
 
     # JWT
-    SECRET_KEY: str
+    SECRET_KEY: str = "CHANGE_ME_IN_PRODUCTION"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
