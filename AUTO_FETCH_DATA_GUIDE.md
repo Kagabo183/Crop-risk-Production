@@ -168,17 +168,17 @@ Total predictions: 100
 ### If data is not updating automatically:
 1. Check Celery Beat is running:
    ```bash
-   docker-compose logs beat
+   docker compose logs beat
    ```
 
 2. Check worker logs:
    ```bash
-   docker-compose logs worker
+   docker compose logs worker
    ```
 
 3. Manually trigger update:
    ```bash
-   python scripts\auto_fetch_data.py
+   python -m scripts.auto_fetch_data
    ```
 
 ### If API returns old data:

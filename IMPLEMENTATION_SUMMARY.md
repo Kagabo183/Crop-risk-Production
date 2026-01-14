@@ -142,10 +142,10 @@ Your crop risk backend has been successfully enhanced with **CPN-level disease p
 
 Commands:
 ```bash
-python scripts/fetch_enhanced_weather.py all --days 7
-python scripts/fetch_enhanced_weather.py farm --farm-id 1 --days 30
-python scripts/fetch_enhanced_weather.py forecasts --days 7
-python scripts/fetch_enhanced_weather.py summary
+python -m scripts.fetch_enhanced_weather all --days 7
+python -m scripts.fetch_enhanced_weather farm --farm-id 1 --days 30
+python -m scripts.fetch_enhanced_weather forecasts --days 7
+python -m scripts.fetch_enhanced_weather summary
 ```
 
 ✅ **Disease Prediction Generator**  
@@ -153,11 +153,11 @@ python scripts/fetch_enhanced_weather.py summary
 
 Commands:
 ```bash
-python scripts/generate_disease_predictions.py init
-python scripts/generate_disease_predictions.py all
-python scripts/generate_disease_predictions.py farm --farm-id 1
-python scripts/generate_disease_predictions.py forecast --farm-id 1
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions init
+python -m scripts.generate_disease_predictions all
+python -m scripts.generate_disease_predictions farm --farm-id 1
+python -m scripts.generate_disease_predictions forecast --farm-id 1
+python -m scripts.generate_disease_predictions summary
 ```
 
 ---
@@ -298,12 +298,12 @@ ENABLE_WEEKLY_SUMMARIES: bool = True
 - [ ] Weather API keys
 
 ### Installation Steps
-1. [ ] Install dependencies: `pip install -r requirements.txt`
+1. [ ] Install dependencies: `pip install -r backend/requirements.txt`
 2. [ ] Configure `.env` with API keys
-3. [ ] Run migrations: `alembic upgrade head`
-4. [ ] Initialize disease catalog: `python scripts/generate_disease_predictions.py init`
-5. [ ] Fetch initial weather: `python scripts/fetch_enhanced_weather.py all --days 30`
-6. [ ] Generate predictions: `python scripts/generate_disease_predictions.py all`
+3. [ ] Run migrations: `alembic -c backend/alembic.ini upgrade head`
+4. [ ] Initialize disease catalog: `python -m scripts.generate_disease_predictions init`
+5. [ ] Fetch initial weather: `python -m scripts.fetch_enhanced_weather all --days 30`
+6. [ ] Generate predictions: `python -m scripts.generate_disease_predictions all`
 7. [ ] Set up Celery beat for automation
 8. [ ] Test API endpoints: Visit `/docs`
 

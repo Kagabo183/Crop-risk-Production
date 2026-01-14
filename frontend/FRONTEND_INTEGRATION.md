@@ -118,7 +118,7 @@ Frontend runs on: http://localhost:3000
 
 ```bash
 # From project root
-uvicorn main:app --reload
+uvicorn app:app --reload --app-dir backend
 ```
 
 Backend runs on: http://localhost:8000
@@ -239,14 +239,14 @@ Media breakpoint: `768px`
 **Problem**: Disease list is empty  
 **Solution**: 
 ```bash
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 ### Predictions Not Loading
 **Problem**: API returns empty array  
 **Solution**: Generate predictions for selected farm:
 ```bash
-python scripts/generate_disease_predictions.py farm --farm-id 1
+python -m scripts.generate_disease_predictions farm --farm-id 1
 ```
 
 ### CORS Errors

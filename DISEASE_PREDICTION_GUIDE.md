@@ -173,16 +173,16 @@ GET /api/v1/diseases/statistics/{farm_id}?days=30
 
 ```bash
 # Fetch weather for all farms (last 7 days)
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # Fetch for specific farm (last 30 days)
-python scripts/fetch_enhanced_weather.py farm --farm-id 1 --days 30
+python -m scripts.fetch_enhanced_weather farm --farm-id 1 --days 30
 
 # Fetch 7-day forecasts
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 
 # Show summary
-python scripts/fetch_enhanced_weather.py summary
+python -m scripts.fetch_enhanced_weather summary
 ```
 
 ### 2. Generate Disease Predictions
@@ -191,19 +191,19 @@ python scripts/fetch_enhanced_weather.py summary
 
 ```bash
 # Initialize disease catalog
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 
 # Generate predictions for all farms
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 
 # Generate for specific farm
-python scripts/generate_disease_predictions.py farm --farm-id 1
+python -m scripts.generate_disease_predictions farm --farm-id 1
 
 # Generate 7-day forecast
-python scripts/generate_disease_predictions.py forecast --farm-id 1
+python -m scripts.generate_disease_predictions forecast --farm-id 1
 
 # Show summary
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions summary
 ```
 
 ---
@@ -241,7 +241,7 @@ ENABLE_WEEKLY_SUMMARIES=true
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
 New packages added:
@@ -254,13 +254,13 @@ New packages added:
 ### 2. Run Database Migration
 
 ```bash
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 ```
 
 ### 3. Initialize Disease Catalog
 
 ```bash
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 This creates 5 research-backed disease entries:
@@ -278,16 +278,16 @@ Update `.env` with your weather API credentials.
 
 ```bash
 # Historical data
-python scripts/fetch_enhanced_weather.py all --days 30
+python -m scripts.fetch_enhanced_weather all --days 30
 
 # Forecasts
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 ```
 
 ### 6. Generate Disease Predictions
 
 ```bash
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 ```
 
 ### 7. Set Up Automated Tasks

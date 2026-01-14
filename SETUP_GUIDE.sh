@@ -18,7 +18,7 @@ Quick reference for getting the disease prediction system running
 # ================================
 # STEP 2: INSTALL DEPENDENCIES
 # ================================
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # ================================
 # STEP 3: CONFIGURE ENVIRONMENT
@@ -41,43 +41,43 @@ cp .env.template .env
 createdb crop_risk_db
 
 # Run migrations
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 
 # ================================
 # STEP 5: INITIALIZE DISEASE CATALOG
 # ================================
 # This creates the 5 research-backed disease models
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 
 # ================================
 # STEP 6: FETCH WEATHER DATA
 # ================================
 # Fetch historical weather (last 7 days)
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # Fetch weather forecasts (next 7 days)
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 
 # ================================
 # STEP 7: GENERATE PREDICTIONS
 # ================================
 # Generate disease predictions for all farms
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 
 # ================================
 # STEP 8: TEST THE SYSTEM
 # ================================
 # Run test suite to verify everything works
-python scripts/test_disease_system.py
+python -m scripts.test_disease_system
 
 # ================================
 # STEP 9: START THE API SERVER
 # ================================
 # Development mode
-uvicorn main:app --reload
+uvicorn app:app --reload --app-dir backend
 
 # Production mode
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir backend
 
 # ================================
 # STEP 10: ACCESS API DOCUMENTATION
@@ -126,7 +126,7 @@ celery -A app.tasks.celery_app beat --loglevel=info
 # Solution: Check DATABASE_URL in .env, ensure PostgreSQL is running
 
 # Problem: No diseases found
-# Solution: Run: python scripts/generate_disease_predictions.py init
+# Solution: Run: python -m scripts.generate_disease_predictions init
 
 # Problem: Weather API errors
 # Solution: APIs will fallback to mock data if keys not configured

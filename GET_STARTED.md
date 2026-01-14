@@ -10,7 +10,7 @@ Your crop risk backend now has **enterprise-level disease prediction capabilitie
 
 ### 1. Install Dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
 ### 2. Configure Environment
@@ -25,22 +25,22 @@ cp .env.template .env
 ### 3. Setup Database
 ```bash
 # Run migrations
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 
 # Initialize diseases (creates 5 research-backed models)
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 ### 4. Test the System
 ```bash
 # Run comprehensive test suite
-python scripts/test_disease_system.py
+python -m scripts.test_disease_system
 ```
 
 ### 5. Start the Server
 ```bash
 # Start API
-uvicorn main:app --reload
+uvicorn app:app --reload --app-dir backend
 
 # Visit API docs
 # http://localhost:8000/docs
@@ -86,25 +86,25 @@ uvicorn main:app --reload
 ### Weather Data
 ```bash
 # Fetch for all farms (last 7 days)
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # Get forecasts (next 7 days)
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 
 # Check status
-python scripts/fetch_enhanced_weather.py summary
+python -m scripts.fetch_enhanced_weather summary
 ```
 
 ### Disease Predictions
 ```bash
 # Generate for all farms
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 
 # Specific farm
-python scripts/generate_disease_predictions.py farm --farm-id 1
+python -m scripts.generate_disease_predictions farm --farm-id 1
 
 # View summary
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions summary
 ```
 
 ### API Testing
@@ -284,7 +284,7 @@ After setup, verify:
 
 **Run test suite to check all at once:**
 ```bash
-python scripts/test_disease_system.py
+python -m scripts.test_disease_system
 ```
 
 ---
@@ -298,13 +298,13 @@ pg_isready
 
 # Verify DATABASE_URL in .env
 # Run migrations
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 ```
 
 ### No Diseases Found
 ```bash
 # Initialize disease catalog
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 ### API Not Working
@@ -316,13 +316,13 @@ curl http://localhost:8000/health
 tail -f logs/app.log
 
 # Restart server
-uvicorn main:app --reload
+uvicorn app:app --reload --app-dir backend
 ```
 
 ### Import Errors
 ```bash
 # Reinstall dependencies
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # Verify you're in project root
 pwd
@@ -377,10 +377,10 @@ Your crop risk backend is now a **comprehensive disease prediction platform**!
 **Start the system:**
 ```bash
 # 1. Run test suite
-python scripts/test_disease_system.py
+python -m scripts.test_disease_system
 
 # 2. Start API server
-uvicorn main:app --reload
+uvicorn app:app --reload --app-dir backend
 
 # 3. Visit docs
 # http://localhost:8000/docs

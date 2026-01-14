@@ -178,7 +178,7 @@ def print_summary(results):
     if passed == total:
         print("🎉 All systems operational!")
         print("\n📚 Next steps:")
-        print("   1. Start the API server: uvicorn main:app --reload")
+        print("   1. Start the API server: uvicorn app:app --reload --app-dir backend")
         print("   2. Visit API docs: http://localhost:8000/docs")
         print("   3. Fetch weather data: python scripts/fetch_enhanced_weather.py all")
         print("   4. Generate predictions: python scripts/generate_disease_predictions.py all")
@@ -188,7 +188,7 @@ def print_summary(results):
         if not results.get("Database Connection"):
             print("   • Check DATABASE_URL in .env file")
             print("   • Ensure PostgreSQL is running")
-            print("   • Run migrations: alembic upgrade head")
+            print("   • Run migrations: alembic -c backend/alembic.ini upgrade head")
         if not results.get("Disease Catalog"):
             print("   • Initialize diseases: python scripts/generate_disease_predictions.py init")
         if not results.get("Forecast Engine") and not results.get("Disease Catalog"):

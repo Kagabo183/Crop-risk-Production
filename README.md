@@ -6,16 +6,13 @@ AI-powered full-stack platform for agricultural risk management in Rwanda and Ea
 
 ```
 crop-risk-backend/
-├── app/                    # FastAPI backend application
-│   ├── api/               # API endpoints
-│   ├── core/              # Auth, config
-│   ├── db/                # Database setup
-│   ├── ml/                # Machine learning models
-│   ├── models/            # SQLAlchemy models
-│   ├── schemas/           # Pydantic schemas
-│   ├── services/          # Business logic
-│   ├── tasks/             # Celery tasks (auto-processing)
-│   └── utils/             # Utilities
+├── backend/                # FastAPI backend (Python)
+│   ├── app/               # Application package (imports start with `app.*`)
+│   ├── migrations/        # Alembic migrations
+│   ├── requirements.txt   # Backend dependencies
+│   ├── requirements-dev.txt
+│   ├── alembic.ini
+│   └── Dockerfile
 ├── frontend/              # React frontend application
 │   ├── public/
 │   └── src/
@@ -24,7 +21,6 @@ crop-risk-backend/
 │       └── api.js         # API client
 ├── data/                  # Satellite imagery data
 ├── scripts/               # Data processing scripts
-├── migrations/            # Alembic database migrations
 └── docker-compose.yml     # Docker orchestration
 
 ```
@@ -56,8 +52,8 @@ venv\Scripts\activate
 
 2. Install dependencies:
 ```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt
 ```
 
 3. Setup database:
@@ -74,7 +70,7 @@ CREATE DATABASE crop_risk_db;
 
 5. Run locally (development):
 ```bash
-python main.py
+uvicorn app:app --reload --app-dir backend
 ```
 
 6. Or using Docker (recommended):
@@ -96,20 +92,15 @@ API Documentation: http://localhost:8000/docs
 
 ```
 crop-risk-backend/
-├── app/
-│   ├── api/v1/          # API endpoints
-│   ├── core/            # Core configs
-│   ├── db/              # Database
-│   ├── models/          # SQLAlchemy models
-│   ├── schemas/         # Pydantic schemas
-│   ├── services/        # Business logic
-│   ├── ml/              # ML models & pipelines
-│   └── utils/           # Utilities
-├── tests/               # Tests
-├── scripts/             # Helper scripts
-├── data/                # Data storage
-├── logs/                # Logs
-└── migrations/          # Alembic migrations
+├── backend/
+│   ├── app/             # FastAPI package (imports start with `app.*`)
+│   ├── tests/           # Backend tests
+│   ├── migrations/      # Alembic migrations
+│   ├── alembic.ini
+│   └── requirements.txt
+├── scripts/              # Helper scripts
+├── data/                 # Data storage
+└── logs/                 # Logs
 ```
 
 ## 🛠️ Development

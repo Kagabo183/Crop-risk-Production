@@ -563,7 +563,7 @@ Celery Flower provides a web interface for monitoring tasks. Administrators can 
 
 ### Development Environment
 
-For local development, start all services with docker-compose up. This starts the database, Redis, API server, workers, Beat scheduler, and frontend. The API runs with hot-reload enabled, so code changes take effect immediately. Database migrations are applied automatically on startup.
+For local development, start all services with docker compose up. This starts the database, Redis, API server, workers, Beat scheduler, and frontend. The API runs with hot-reload enabled, so code changes take effect immediately. Database migrations are applied automatically on startup.
 
 Access the API at http://localhost:8000 and API documentation at http://localhost:8000/docs. Access the frontend at http://localhost:3000.
 

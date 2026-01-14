@@ -1,18 +1,16 @@
-PY = python
-
 .PHONY: build up down logs shell migrate
 
 build:
-	docker-compose build
+	docker compose build
 
 up:
-	docker-compose up -d --build
+	docker compose up -d --build
 
 down:
-	docker-compose down
+	docker compose down
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 shell:
-	docker-compose exec web /bin/bash
+	docker compose exec web /bin/bash

@@ -34,7 +34,7 @@ Then verify:
 
 If your label file has a crop column (e.g. `crop`, `class`, `crop_name`):
 
-`python scripts/import_crop_labels.py --input <PATH_TO_LABELS> --crop-field <CROP_COLUMN> --source RadiantMLHub --country Rwanda`
+`python -m scripts.import_crop_labels --input <PATH_TO_LABELS> --crop-field <CROP_COLUMN> --source RadiantMLHub --country Rwanda`
 
 If you have a local PostgreSQL installed on your machine, Docker may not be able to use port 5433.
 This repo uses `5434` for the Docker database port mapping.

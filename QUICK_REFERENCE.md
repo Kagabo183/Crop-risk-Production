@@ -4,19 +4,19 @@
 
 ```bash
 # 1. Install dependencies
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # 2. Run migrations
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 
 # 3. Initialize disease catalog
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 
 # 4. Fetch weather data
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # 5. Generate predictions
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 ```
 
 ## Essential Commands
@@ -24,31 +24,31 @@ python scripts/generate_disease_predictions.py all
 ### Weather Data
 ```bash
 # All farms, last 7 days
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # Specific farm, last 30 days
-python scripts/fetch_enhanced_weather.py farm --farm-id 1 --days 30
+python -m scripts.fetch_enhanced_weather farm --farm-id 1 --days 30
 
 # Get 7-day forecasts
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 
 # Show summary
-python scripts/fetch_enhanced_weather.py summary
+python -m scripts.fetch_enhanced_weather summary
 ```
 
 ### Disease Predictions
 ```bash
 # All farms
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 
 # Specific farm
-python scripts/generate_disease_predictions.py farm --farm-id 1
+python -m scripts.generate_disease_predictions farm --farm-id 1
 
 # 7-day forecast
-python scripts/generate_disease_predictions.py forecast --farm-id 1
+python -m scripts.generate_disease_predictions forecast --farm-id 1
 
 # Show summary
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions summary
 ```
 
 ## API Quick Start
@@ -215,19 +215,19 @@ app.conf.beat_schedule = {
 ### No predictions generated
 ```bash
 # Check disease catalog
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions summary
 
 # If empty, initialize
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 ### Weather data missing
 ```bash
 # Check weather records
-python scripts/fetch_enhanced_weather.py summary
+python -m scripts.fetch_enhanced_weather summary
 
 # Fetch data
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 ```
 
 ### API errors

@@ -38,7 +38,7 @@ Your crop risk backend has been upgraded to **CPN-level disease prediction capab
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
 ### 2. Set Up Environment
@@ -60,29 +60,29 @@ DISEASE_MODEL_VERSION=v1.0
 ### 3. Run Migrations
 
 ```bash
-alembic upgrade head
+alembic -c backend/alembic.ini upgrade head
 ```
 
 ### 4. Initialize Disease Catalog
 
 ```bash
-python scripts/generate_disease_predictions.py init
+python -m scripts.generate_disease_predictions init
 ```
 
 ### 5. Fetch Weather Data
 
 ```bash
 # Historical data
-python scripts/fetch_enhanced_weather.py all --days 7
+python -m scripts.fetch_enhanced_weather all --days 7
 
 # Forecasts
-python scripts/fetch_enhanced_weather.py forecasts --days 7
+python -m scripts.fetch_enhanced_weather forecasts --days 7
 ```
 
 ### 6. Generate Predictions
 
 ```bash
-python scripts/generate_disease_predictions.py all
+python -m scripts.generate_disease_predictions all
 ```
 
 ---
@@ -288,7 +288,7 @@ Add to Celery beat schedule for automated operation:
 Track system performance:
 
 ```bash
-python scripts/generate_disease_predictions.py summary
+python -m scripts.generate_disease_predictions summary
 ```
 
 Shows:
