@@ -13,6 +13,7 @@ An intelligent crop monitoring system that combines satellite imagery, weather d
 - [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
 - [Quick Start](#quick-start)
+- [Frontend Guide](#frontend-guide)
 - [Configuration](#configuration)
 - [API Documentation](#api-documentation)
 - [Machine Learning](#machine-learning)
@@ -94,8 +95,15 @@ The Crop Risk Prediction Platform provides:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        CLIENT APPLICATIONS                       │
-│                    (Mobile App / Web Dashboard)                  │
+│                   React + Vite Frontend (Port 3000)              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │Dashboard │ │  Farms   │ │Satellite │ │  Stress  │          │
+│  │          │ │  CRUD    │ │  Data    │ │ Monitor  │          │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
+│  │ Disease  │ │   Risk   │ │ Disease  │ │    ML    │          │
+│  │Classifier│ │Assessment│ │Forecasts │ │  Models  │          │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
 └─────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
@@ -107,8 +115,8 @@ The Crop Risk Prediction Platform provides:
 │  │   API       │  │   API       │  │   API       │             │
 │  └─────────────┘  └─────────────┘  └─────────────┘             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │  Satellite  │  │   Stress    │  │   Alerts    │             │
-│  │   API       │  │   API       │  │   API       │             │
+│  │  Satellite  │  │   Stress    │  │   ML API    │             │
+│  │   API       │  │   API       │  │  (6 models) │             │
 │  └─────────────┘  └─────────────┘  └─────────────┘             │
 └─────────────────────────────────────────────────────────────────┘
                                   │
@@ -159,6 +167,10 @@ The Crop Risk Prediction Platform provides:
 | **ML Models** | XGBoost, scikit-learn, Prophet | Latest |
 | **Satellite** | Google Earth Engine, PySTAC | Latest |
 | **Geospatial** | Rasterio, GeoPandas, Shapely | Latest |
+| **Frontend** | React 18 + Vite | 5.x |
+| **Charts** | Recharts | Latest |
+| **Icons** | Lucide React | Latest |
+| **HTTP Client** | Axios | Latest |
 | **Auth** | JWT (python-jose) | Latest |
 
 ---
@@ -193,6 +205,7 @@ docker-compose logs -f
 ```
 
 Services will be available at:
+- **Frontend Dashboard**: http://localhost:3000
 - **API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
 - **PostgreSQL**: localhost:5434
@@ -230,6 +243,169 @@ celery -A app.tasks.celery_app worker --loglevel=info
 # 8. Start Celery beat scheduler (new terminal)
 celery -A app.tasks.celery_app beat --loglevel=info
 ```
+
+---
+
+## Frontend Guide
+
+The platform includes a full **React + Vite** web dashboard at **http://localhost:3000** with 8 pages covering farm management, satellite monitoring, stress analysis, ML-powered disease detection, and risk assessment.
+
+### Pages Overview
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Dashboard | `/` | Platform overview — farm stats, NDVI chart, health distribution, quick actions |
+| Farm Management | `/farms` | Register, edit, delete farms; scan leaves for disease |
+| Satellite Data | `/satellite` | NDVI monitoring with date range selection and Copernicus download |
+| Stress Monitoring | `/stress-monitoring` | Drought, heat, water, and nutrient stress analysis |
+| Disease Classifier | `/disease-classifier` | Upload leaf images for AI disease detection (80 classes) |
+| Risk Assessment | `/risk-assessment` | ML-powered risk scoring with radar chart and yield prediction |
+| Disease Forecasts | `/disease-forecasts` | 7-day disease risk forecasting with treatment guidance |
+| ML Models | `/ml-models` | Monitor ML model status, test anomaly detection and health forecasting |
+
+### 1. Dashboard (`/`)
+
+The landing page provides a high-level overview of all farms:
+
+- **Stats cards**: Total farms, average NDVI, stressed farms count, ML models ready
+- **Bar chart**: Top 10 farms by NDVI comparison
+- **Pie chart**: Farm health distribution (Healthy / Moderate / Stressed)
+- **Farm table**: All farms with location, crop, area, NDVI, and color-coded status badges
+- **Quick actions**: Links to Disease Classifier, Risk Assessment, Stress Monitoring, Disease Forecasts
+
+### 2. Farm Management (`/farms`)
+
+Full CRUD for farms with integrated leaf disease scanning.
+
+**How to register a new farm:**
+1. Click **"Register New Farm"** button
+2. Fill in the form:
+   - **Farm Name** (required) — e.g. "Musanze Highland Farm"
+   - **Location / District** — e.g. "Musanze"
+   - **Province** — dropdown: Northern, Southern, Eastern, Western, Kigali
+   - **Crop Types** — comma-separated, e.g. `potato, maize, beans` (supports multiple crops)
+   - **Area** (hectares) — e.g. `2.5`
+   - **Latitude / Longitude** — e.g. `-1.6774`, `29.2345`
+3. Click **"Register Farm"**
+
+**How to edit a farm:**
+1. Click the **pencil icon** on any farm card
+2. The form opens with the farm's current data pre-filled
+3. Make changes and click **"Update Farm"**
+
+**How to delete a farm:**
+1. Click the **trash icon** on any farm card
+2. Confirm deletion — this also removes all related satellite and weather data
+
+**How to scan a leaf for disease:**
+1. Click **"Scan Leaf"** on any farm card
+2. Select a leaf image (JPG/PNG) from your device
+3. The system classifies the disease using the EfficientNet-B0 CNN (80 classes, 30 plants)
+4. Results appear inline on the farm card showing:
+   - Disease name and confidence percentage
+   - Crop type detected
+   - Whether the plant appears healthy
+
+Each farm card displays: location, crop types, area, NDVI value with progress bar, coordinates, last satellite update, and health status badge (healthy/moderate/high stress).
+
+### 3. Satellite Data (`/satellite`)
+
+Monitor vegetation health through NDVI satellite data with custom date ranges.
+
+**How to fetch satellite data:**
+1. Select a farm from the dropdown
+2. Set **Start Date** and **End Date** (defaults to last 90 days)
+3. Click **"Fetch Satellite Data"** to generate simulated NDVI records for the selected range
+4. Or click **"Download from Copernicus"** to trigger a real Sentinel-2 data pipeline
+
+**Features:**
+- **Stats cards**: Current NDVI, status, data source, last update date
+- **NDVI History Chart**: Area chart with date on X-axis, NDVI (0-1) on Y-axis, reference lines at 0.6 (healthy) and 0.4 (moderate)
+- **All Farms Table**: Overview of all farms with NDVI, status, source, date, cloud cover %
+- Success message shows how many records were created
+
+### 4. Stress Monitoring (`/stress-monitoring`)
+
+Analyze environmental and physiological stress factors for any farm.
+
+**How to use:**
+1. Select a farm from the dropdown
+2. Click the **refresh button** to reload data
+
+**Displays:**
+- **Health Score** (0-100) and overall stress level (none/low/moderate/high/severe)
+- **Stress Breakdown**: Horizontal bars showing percentage of drought, heat, water, and nutrient stress (color-coded: red >60%, orange 30-60%, green <30%)
+- **Current Vegetation Indices**: NDVI, NDWI, EVI values with acquisition date
+- **90-Day Health Chart**: Area chart overlaying NDVI, NDWI, and EVI trends
+- **Detailed Stress Cards**: Drought assessment, water stress, and heat stress data
+
+### 5. Disease Classifier (`/disease-classifier`)
+
+AI-powered leaf disease identification using a trained EfficientNet-B0 CNN.
+
+**How to classify a leaf image:**
+1. (Optional) Select a **crop type** from the dropdown to narrow results to a specific plant
+2. **Drag and drop** or **click** to upload a leaf image (JPG/PNG)
+3. Click **"Classify Disease"**
+4. View results:
+   - **Plant species** and **disease name** (or "Healthy")
+   - **Confidence percentage** with color-coded bar (green ≥70%, orange ≥40%, red <40%)
+   - **Treatment recommendations** (if diseased): urgency level, spread risk, fungicides, cultural practices
+   - **Top 5 predictions** with alternative diagnoses
+
+**Supported**: 30 plant species, 80 disease classes, including Africa-relevant crops (coffee, rice, maize, potato, tomato, mango, cotton).
+
+### 6. Risk Assessment (`/risk-assessment`)
+
+Comprehensive ML-powered risk analysis for individual farms.
+
+**How to use:**
+1. Select a farm from the dropdown
+2. View the risk assessment:
+   - **Risk score** (0-100) with gauge visualization
+   - **Risk level**: low/moderate/high/severe with primary driver
+   - **Radar chart**: Multi-dimensional risk breakdown (disease pressure, weather stress, nutritional status, etc.)
+   - **Contributions chart**: Horizontal bars showing each factor's % impact
+   - **Recommendations**: Numbered action items to mitigate risk
+   - **Yield prediction**: Predicted tons/hectare with confidence range
+   - **What-if scenarios**: How changing factors would affect the risk score
+3. Click **"Refresh Assessment"** to re-run
+
+### 7. Disease Forecasts (`/disease-forecasts`)
+
+7-day disease risk forecasting with treatment timing guidance.
+
+**How to use:**
+1. Select a **farm** from the dropdown
+2. Select a **disease** (Late Blight, Early Blight, Septoria Leaf Spot, etc.)
+3. Click **"Get Forecast"**
+4. View results:
+   - **7-Day Summary**: Average risk, peak risk day, treatment window, recommended fungicide
+   - **Daily Forecast Chart**: Bar chart with per-day risk scores (color-coded by risk level)
+   - **30-Day Statistics**: Total predictions, average/max risk scores, high-risk alert count, risk distribution
+   - **Recent Predictions Table**: Last 10 predictions with date, score, and level
+
+### 8. ML Models (`/ml-models`)
+
+Monitor ML model availability and test inference.
+
+**Displays:**
+- **Overview stats**: Total models, ready models, disease classes (80), plant species (30)
+- **Model cards** for each of the 6 models:
+  - Disease Classifier (EfficientNet-B0 CNN)
+  - Ensemble Risk Scorer (weighted ensemble)
+  - Yield Predictor (XGBoost)
+  - Anomaly Detector (Isolation Forest)
+  - Health Forecaster (Prophet)
+  - Trend Forecaster (Prophet)
+- **Status badges**: ready/loaded/error/not_trained
+- **Supported Plants Grid**: All plants with their associated diseases
+
+**How to test models:**
+1. Select a farm from the dropdown in the "Test Models" section
+2. Click **"Detect Anomalies"** to run 30-day anomaly detection
+3. Click **"Forecast Health"** to generate a 7-day health forecast
+4. Results display as formatted JSON
 
 ---
 
@@ -628,14 +804,15 @@ Weekly  → ML model retraining
 
 ```
 crop-risk-backend/
-├── backend/
+├── backend/                                # FastAPI Backend
 │   ├── app/
 │   │   ├── api/
 │   │   │   └── v1/
 │   │   │       ├── endpoints/
-│   │   │       │   ├── farms.py           # Farm CRUD
+│   │   │       │   ├── farms.py           # Farm CRUD (GET/POST/PUT/DELETE)
 │   │   │       │   ├── stress_monitoring.py # Stress API
-│   │   │       │   ├── farm_satellite.py   # Satellite API
+│   │   │       │   ├── farm_satellite.py   # Satellite API (date range support)
+│   │   │       │   ├── pipeline.py         # Copernicus data pipeline
 │   │   │       │   ├── ml.py               # ML API endpoints
 │   │   │       │   └── ...
 │   │   │       └── api.py                  # Router aggregation
@@ -664,6 +841,7 @@ crop-risk-backend/
 │   │   │   └── download_pretrained.py      # Pre-trained models
 │   │   ├── services/
 │   │   │   ├── satellite_service.py        # GEE integration
+│   │   │   ├── pipeline_service.py         # Copernicus Sentinel-2 pipeline
 │   │   │   ├── weather_service.py          # Weather integration
 │   │   │   ├── stress_detection_service.py # Stress analysis
 │   │   │   └── disease_intelligence.py     # Disease models
@@ -677,10 +855,26 @@ crop-risk-backend/
 │   ├── migrations/                         # Alembic migrations
 │   ├── requirements.txt
 │   └── Dockerfile
-│   ├── data/
-│   │   └── models/                        # Trained ML models (.pth, .json, .pkl)
-│   ├── notebooks/
-│   │   └── train_disease_classifier.ipynb # Colab training notebook
+├── frontend/                               # React + Vite Frontend
+│   ├── src/
+│   │   ├── api/
+│   │   │   └── index.js                   # Axios API client (all endpoints)
+│   │   ├── pages/
+│   │   │   ├── Dashboard.jsx              # Overview with charts and stats
+│   │   │   ├── Farms.jsx                  # Farm CRUD + leaf disease scanning
+│   │   │   ├── SatelliteData.jsx          # NDVI monitoring + date range
+│   │   │   ├── StressMonitoring.jsx       # Multi-stress analysis
+│   │   │   ├── DiseaseClassifier.jsx      # AI leaf image classification
+│   │   │   ├── RiskAssessment.jsx         # ML risk scoring + yield prediction
+│   │   │   ├── DiseaseForecasts.jsx       # 7-day disease forecasting
+│   │   │   └── MLModels.jsx               # Model status + testing
+│   │   ├── App.jsx                        # Routes and layout
+│   │   └── main.jsx                       # Entry point
+│   ├── Dockerfile
+│   ├── vite.config.js
+│   └── package.json
+├── data/
+│   └── models/                            # Trained ML models (.pth, .json, .pkl)
 ├── logs/                                   # Application logs
 ├── docker-compose.yml
 ├── .env.example
@@ -788,6 +982,6 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Version**: 2.3.0
+**Version**: 2.4.0
 **Last Updated**: February 2026
 **Maintainer**: Crop Risk Platform Team

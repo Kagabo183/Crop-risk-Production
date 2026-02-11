@@ -411,6 +411,8 @@ class DiseaseClassifier:
         """Setup image preprocessing transforms"""
         try:
             from torchvision import transforms
+            # Match the training transforms - NO normalization
+            # User's training code did not use ImageNet normalization
             self.transforms = transforms.Compose([
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
@@ -449,19 +451,31 @@ class DiseaseClassifier:
 
             path = Path(model_path) if model_path else self.model_path
 
-            # Try to load saved class mapping
+            # CRITICAL: Load saved class mapping from training FIRST
+            # This ensures we use the exact class order from training
             class_map = self.class_map_path if not model_path else Path(model_path).with_suffix('.json')
+            logger.info(f"Looking for class mapping at: {class_map}")
+            
             if class_map.exists():
+                logger.info(f"Found class mapping file: {class_map}")
                 with open(class_map, 'r') as f:
                     saved = json.load(f)
                     if 'classes' in saved:
                         cls = saved['classes']
                         if isinstance(cls, list):
                             self.classes = {i: v for i, v in enumerate(cls)}
+                            logger.info(f"Loaded {len(cls)} classes from JSON (list format)")
+                            logger.info(f"Sample classes: {dict(list(self.classes.items())[:5])}")
                         else:
                             self.classes = {int(k): v for k, v in cls.items()}
+                            logger.info(f"Loaded {len(cls)} classes from JSON (dict format)")
                         self.num_classes = len(self.classes)
                         self.class_to_idx = {v: k for k, v in self.classes.items()}
+                        logger.info(f"✅ Successfully loaded class mapping with {self.num_classes} classes")
+                    else:
+                        logger.warning("JSON file exists but has no 'classes' key, using hardcoded CLASS_INFO")
+            else:
+                logger.warning(f"⚠️ Class mapping file not found at {class_map}, using hardcoded CLASS_INFO")
 
             if not path.exists():
                 logger.warning(f"Model file not found at {path}, creating new model")
@@ -530,10 +544,14 @@ class DiseaseClassifier:
 
             with torch.no_grad():
                 outputs = self.model(image)
-                # Temperature scaling to reduce overconfidence
-                # (T>1 softens probabilities, T=1 is standard softmax)
-                temperature = 2.5
+                # Temporarily reduced temperature for debugging
+                # TODO: Adjust based on model performance
+                temperature = 1.0  # Standard softmax (was 2.5)
                 probabilities = F.softmax(outputs / temperature, dim=1)
+                
+                # Log top predictions for debugging
+                top10_probs, top10_indices = torch.topk(probabilities, min(10, self.num_classes), dim=1)
+                logger.info(f"Top 10 predictions: {[(self.classes.get(idx.item()), prob.item()) for idx, prob in zip(top10_indices[0], top10_probs[0])]}")
 
                 # Get top-5 predictions
                 top5_probs, top5_indices = torch.topk(probabilities, min(5, self.num_classes), dim=1)
@@ -623,6 +641,93 @@ class DiseaseClassifier:
             return (best_idx, best_prob, folder, info[0], info[1], info[2])
 
         return None
+
+    def predict_with_gradcam(self, image_path: str) -> Dict[str, Any]:
+        """
+        Classify disease AND generate Grad-CAM heatmap showing WHERE
+        on the leaf the model detected the disease.
+
+        Returns:
+            Same as predict() plus 'gradcam_base64' (PNG heatmap overlay, base64-encoded)
+        """
+        result = self.predict(image_path)
+        if not self.model_loaded or self.model is None:
+            return result
+
+        try:
+            import torch
+            from PIL import Image
+            import io, base64
+
+            # Re-open original image
+            orig = Image.open(image_path).convert('RGB')
+            inp = self.transforms(orig).unsqueeze(0).to(self.device)
+
+            # Hook into last conv layer of EfficientNet-B0 (features[-1])
+            target_layer = self.model.features[-1]
+            activations = []
+            gradients = []
+
+            def fwd_hook(module, input, output):
+                activations.append(output.detach())
+
+            def bwd_hook(module, grad_in, grad_out):
+                gradients.append(grad_out[0].detach())
+
+            fh = target_layer.register_forward_hook(fwd_hook)
+            bh = target_layer.register_full_backward_hook(bwd_hook)
+
+            # Forward pass
+            self.model.eval()
+            output = self.model(inp)
+            pred_idx = output.argmax(dim=1).item()
+
+            # Backward pass on predicted class
+            self.model.zero_grad()
+            output[0, pred_idx].backward()
+
+            fh.remove()
+            bh.remove()
+
+            # Grad-CAM: weight activations by mean gradient
+            grads = gradients[0][0]            # (C, H, W)
+            acts = activations[0][0]           # (C, H, W)
+            weights = grads.mean(dim=(1, 2))   # (C,)
+            cam = torch.relu((weights[:, None, None] * acts).sum(dim=0))  # (H, W)
+
+            # Normalize 0-1
+            cam = cam - cam.min()
+            if cam.max() > 0:
+                cam = cam / cam.max()
+            cam_np = cam.cpu().numpy()
+
+            # Resize to original image size and create overlay
+            import numpy as np
+            cam_resized = np.array(Image.fromarray((cam_np * 255).astype(np.uint8)).resize(orig.size, Image.BILINEAR)) / 255.0
+
+            # Create heatmap (blue -> green -> yellow -> red)
+            heatmap = np.zeros((*cam_resized.shape, 3), dtype=np.uint8)
+            heatmap[..., 0] = (cam_resized * 255).astype(np.uint8)  # Red channel
+            heatmap[..., 1] = ((1 - np.abs(cam_resized - 0.5) * 2) * 255).astype(np.uint8)  # Green peaks at 0.5
+            heatmap[..., 2] = ((1 - cam_resized) * 255).astype(np.uint8)  # Blue channel (inverse)
+
+            # Overlay: 60% original + 40% heatmap
+            orig_np = np.array(orig)
+            overlay = (orig_np * 0.6 + heatmap * 0.4).astype(np.uint8)
+
+            # Encode to base64 PNG
+            overlay_img = Image.fromarray(overlay)
+            buf = io.BytesIO()
+            overlay_img.save(buf, format='PNG')
+            b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+            result['gradcam_base64'] = b64
+
+        except Exception as e:
+            logger.warning(f"Grad-CAM generation failed (prediction still valid): {e}")
+            result['gradcam_base64'] = None
+
+        return result
 
     def predict_batch(self, image_paths: List[str]) -> List[Dict[str, Any]]:
         """Classify multiple images."""

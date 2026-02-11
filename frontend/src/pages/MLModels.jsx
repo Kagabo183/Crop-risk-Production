@@ -80,7 +80,11 @@ export default function MLModels() {
   if (loading) return <div className="loading"><div className="spinner" /><p>Loading model status...</p></div>
 
   const modelEntries = models?.models ? Object.entries(models.models) : []
-  const readyCount = modelEntries.filter(([, s]) => s === 'ready' || s === 'loaded').length
+  // New API format: models.models[key] = {status, trained, description, ...}
+  const readyCount = modelEntries.filter(([, modelInfo]) => {
+    const st = typeof modelInfo === 'string' ? modelInfo : modelInfo?.status
+    return st === 'ready' || st === 'loaded' || st === 'available'
+  }).length
 
   return (
     <>
@@ -126,8 +130,13 @@ export default function MLModels() {
         </div>
         <div className="card-body">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-            {modelEntries.map(([key, status]) => {
+            {modelEntries.map(([key, modelInfo]) => {
               const info = MODEL_INFO[key] || { name: key.replace(/_/g, ' '), desc: '', algo: '' }
+              // Handle both old string format and new object format
+              const status = typeof modelInfo === 'string' ? modelInfo : modelInfo?.status || 'unknown'
+              const trained = typeof modelInfo === 'object' ? modelInfo?.trained : null
+              const note = typeof modelInfo === 'object' ? modelInfo?.note : null
+
               const st = STATUS_ICONS[status] || STATUS_ICONS.not_loaded
               const Icon = st.icon
 
@@ -151,14 +160,21 @@ export default function MLModels() {
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{info.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{info.desc}</div>
-                    <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                    <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <span className={`badge ${status === 'ready' || status === 'loaded' ? 'healthy' : status === 'error' ? 'high' : 'info'}`}>
                         {status}
                       </span>
+                      {trained === true && <span className="badge healthy">Trained</span>}
+                      {trained === false && <span className="badge info">Defaults</span>}
                       {info.algo && (
                         <span className="badge info">{info.algo}</span>
                       )}
                     </div>
+                    {note && (
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                        {note}
+                      </div>
+                    )}
                   </div>
                 </div>
               )
