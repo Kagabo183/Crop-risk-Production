@@ -1,0 +1,650 @@
+"""
+Machine Learning API Endpoints
+Provides REST API access to ML models and predictions
+"""
+import os
+import logging
+from typing import List, Optional
+from datetime import datetime
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.db.database import get_db
+from app.models.farm import Farm
+from app.models.data import SatelliteImage, WeatherRecord
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# Temporary upload directory
+UPLOAD_DIR = Path(os.environ.get('UPLOAD_DIR', '/tmp/uploads'))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ============ Request/Response Models ============
+
+class DiseaseClassifyRequest(BaseModel):
+    """Request for disease classification"""
+    image_url: Optional[str] = None
+    crop_type: Optional[str] = Field(default=None, description="Optional crop filter (e.g. potato, tomato, rice, coffee, mango). If None, classifies across all 30 plants.")
+
+
+class DiseaseClassifyResponse(BaseModel):
+    """Response from disease classification"""
+    plant: str
+    disease: str
+    confidence: float
+    is_healthy: Optional[bool]
+    top5: list
+    treatment: dict
+    crop_type: str
+
+
+class RiskAssessmentRequest(BaseModel):
+    """Request for risk assessment"""
+    farm_id: int
+    include_forecast: bool = Field(default=True)
+    forecast_days: int = Field(default=7, ge=1, le=30)
+
+
+class RiskAssessmentResponse(BaseModel):
+    """Response from risk assessment"""
+    farm_id: int
+    overall_risk_score: float
+    risk_level: str
+    confidence: float
+    components: dict
+    primary_driver: str
+    recommendations: List[str]
+    timestamp: str
+
+
+class YieldPredictionRequest(BaseModel):
+    """Request for yield prediction"""
+    farm_id: int
+    crop_type: Optional[str] = None
+
+
+class YieldPredictionResponse(BaseModel):
+    """Response from yield prediction"""
+    farm_id: int
+    predicted_yield_tons_ha: float
+    lower_bound: float
+    upper_bound: float
+    confidence: float
+    yield_class: str
+    recommendations: List[str]
+
+
+class AnomalyDetectionRequest(BaseModel):
+    """Request for anomaly detection"""
+    farm_id: int
+    days_back: int = Field(default=30, ge=7, le=90)
+
+
+class HealthForecastRequest(BaseModel):
+    """Request for health trend forecast"""
+    farm_id: int
+    forecast_days: int = Field(default=14, ge=7, le=30)
+    include_scenarios: bool = Field(default=False)
+
+
+class ModelStatusResponse(BaseModel):
+    """Response for model status"""
+    overall: str
+    models: dict
+    timestamp: str
+
+
+# ============ Helper Functions ============
+
+def get_farm_data(farm_id: int, db: Session) -> dict:
+    """
+    Fetch farm data including vegetation, weather, and metadata.
+    """
+    # Get farm
+    farm = db.query(Farm).filter(Farm.id == farm_id).first()
+    if not farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+
+    # Get recent satellite data
+    satellite_data = db.query(SatelliteImage).filter(
+        SatelliteImage.farm_id == farm_id
+    ).order_by(SatelliteImage.date.desc()).limit(30).all()
+
+    # Get recent weather data
+    weather_data = db.query(WeatherRecord).filter(
+        WeatherRecord.farm_id == farm_id
+    ).order_by(WeatherRecord.date.desc()).limit(30).all()
+
+    # Compute vegetation statistics
+    ndvi_values = [s.ndvi for s in satellite_data if s.ndvi is not None]
+    vegetation = {
+        'ndvi': ndvi_values[0] if ndvi_values else 0.5,
+        'ndvi_mean': sum(ndvi_values) / len(ndvi_values) if ndvi_values else 0.5,
+        'ndvi_max': max(ndvi_values) if ndvi_values else 0.6,
+        'ndvi_trend': 0.0,  # Would compute from time series
+        'historical_ndvi_mean': sum(ndvi_values) / len(ndvi_values) if ndvi_values else 0.6,
+        'health_score': 70.0  # Default
+    }
+
+    # Compute weather statistics
+    weather = {}
+    if weather_data:
+        temps = [w.temperature for w in weather_data if w.temperature is not None]
+        rainfall = [w.rainfall for w in weather_data if w.rainfall is not None]
+
+        weather = {
+            'temperature': temps[0] if temps else 20.0,
+            'temp_mean': sum(temps) / len(temps) if temps else 20.0,
+            'temp_max': max(temps) if temps else 25.0,
+            'temp_min': min(temps) if temps else 15.0,
+            'rainfall': sum(rainfall[:7]) if rainfall else 0.0,  # Last 7 days
+            'rainfall_7d': sum(rainfall[:7]) if rainfall else 0.0,
+            'rainfall_total': sum(rainfall) if rainfall else 0.0,
+            'humidity': weather_data[0].humidity if hasattr(weather_data[0], 'humidity') else 70.0,
+            'leaf_wetness_hours': 8  # Default estimate
+        }
+
+    return {
+        'farm': {
+            'id': farm.id,
+            'name': farm.name,
+            'area': farm.area or 1.0,
+            'latitude': farm.latitude,
+            'longitude': farm.longitude,
+            'elevation': 1500  # Default for Rwanda
+        },
+        'vegetation': vegetation,
+        'weather': weather,
+        'crop_type': farm.crop_type or 'potato',
+        'growing_season_days': 90,
+        'historical': {
+            'yield_mean': 12.0,  # Default
+            'yield_trend': 0.0
+        }
+    }
+
+
+# ============ Disease Classification Endpoints ============
+
+@router.post("/classify-disease", response_model=DiseaseClassifyResponse)
+async def classify_disease(
+    file: UploadFile = File(...),
+    crop_type: Optional[str] = Query(default=None, description="Optional crop filter")
+):
+    """
+    Classify plant disease from uploaded leaf image.
+
+    Supports 30 plant species and 56 diseases (80 classes total).
+    Optionally filter by crop_type (e.g. potato, tomato, rice, coffee, mango).
+    """
+    try:
+        from app.ml import DiseaseClassifier
+
+        # Save uploaded file
+        file_path = UPLOAD_DIR / f"disease_{datetime.utcnow().timestamp()}_{file.filename}"
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        # Classify
+        classifier = DiseaseClassifier(crop_type=crop_type)
+        result = classifier.predict(str(file_path))
+
+        # Clean up
+        file_path.unlink(missing_ok=True)
+
+        return DiseaseClassifyResponse(
+            plant=result.get('plant', 'Unknown'),
+            disease=result['disease'],
+            confidence=result['confidence'],
+            is_healthy=result.get('is_healthy'),
+            top5=result.get('top5', []),
+            treatment=result.get('treatment', {}),
+            crop_type=result.get('crop_type', crop_type or 'unknown')
+        )
+
+    except Exception as e:
+        logger.error(f"Disease classification failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/supported-diseases")
+async def get_supported_diseases():
+    """
+    Get list of all supported plants and diseases (80 classes).
+    """
+    from app.ml.disease_classifier import PLANT_DISEASES, TREATMENT_RECOMMENDATIONS, NUM_CLASSES
+
+    return {
+        "total_classes": NUM_CLASSES,
+        "total_plants": len(PLANT_DISEASES),
+        "plants": sorted(PLANT_DISEASES.keys()),
+        "diseases_by_plant": {
+            plant: sorted(set(diseases))
+            for plant, diseases in PLANT_DISEASES.items()
+        },
+        "treatments_available": sorted(TREATMENT_RECOMMENDATIONS.keys())
+    }
+
+
+# ============ Risk Assessment Endpoints ============
+
+@router.post("/risk-assessment", response_model=RiskAssessmentResponse)
+async def calculate_risk_assessment(
+    request: RiskAssessmentRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate comprehensive risk assessment for a farm.
+
+    Combines:
+    - Research-validated disease models (Smith Period, TOM-CAST)
+    - ML anomaly detection
+    - Weather stress analysis
+    - Yield prediction
+    - Health trend forecast
+    """
+    try:
+        from app.ml import EnsembleRiskScorer
+
+        # Get farm data
+        farm_data = get_farm_data(request.farm_id, db)
+
+        # Calculate risk
+        scorer = EnsembleRiskScorer()
+        result = scorer.calculate_risk(farm_data)
+
+        return RiskAssessmentResponse(
+            farm_id=request.farm_id,
+            overall_risk_score=result['overall_risk_score'],
+            risk_level=result['risk_level'],
+            confidence=result['confidence'],
+            components=result['components'],
+            primary_driver=result['primary_driver'],
+            recommendations=result['recommendations'],
+            timestamp=result['timestamp']
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Risk assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/risk-assessment/{farm_id}")
+async def get_risk_assessment(
+    farm_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get risk assessment for a farm (shortcut GET endpoint).
+    """
+    try:
+        from app.ml import EnsembleRiskScorer
+
+        farm_data = get_farm_data(farm_id, db)
+        scorer = EnsembleRiskScorer()
+        result = scorer.calculate_risk(farm_data)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Risk assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/risk-assessment/batch")
+async def batch_risk_assessment(
+    farm_ids: List[int] = Query(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Calculate risk assessment for multiple farms.
+    """
+    try:
+        from app.ml import EnsembleRiskScorer
+
+        farms_data = [get_farm_data(fid, db) for fid in farm_ids]
+        scorer = EnsembleRiskScorer()
+
+        results = scorer.batch_calculate(farms_data)
+        summary = scorer.get_regional_summary(results)
+
+        return {
+            "assessments": results,
+            "summary": summary
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch risk assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Yield Prediction Endpoints ============
+
+@router.post("/predict-yield", response_model=YieldPredictionResponse)
+async def predict_yield(
+    request: YieldPredictionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Predict crop yield for a farm based on current conditions.
+    """
+    try:
+        from app.ml import YieldPredictor
+
+        farm_data = get_farm_data(request.farm_id, db)
+
+        crop_type = request.crop_type or farm_data.get('crop_type', 'potato')
+        predictor = YieldPredictor(crop_type=crop_type)
+        result = predictor.predict(farm_data)
+
+        return YieldPredictionResponse(
+            farm_id=request.farm_id,
+            predicted_yield_tons_ha=result['predicted_yield_tons_ha'],
+            lower_bound=result['lower_bound'],
+            upper_bound=result['upper_bound'],
+            confidence=result['confidence'],
+            yield_class=result['yield_class'],
+            recommendations=result.get('recommendations', [])
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Yield prediction failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/predict-yield/{farm_id}")
+async def get_yield_prediction(
+    farm_id: int,
+    crop_type: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get yield prediction for a farm (shortcut GET endpoint).
+    """
+    try:
+        from app.ml import YieldPredictor
+
+        farm_data = get_farm_data(farm_id, db)
+        crop_type = crop_type or farm_data.get('crop_type', 'potato')
+
+        predictor = YieldPredictor(crop_type=crop_type)
+        result = predictor.predict(farm_data)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Yield prediction failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Anomaly Detection Endpoints ============
+
+@router.post("/detect-anomalies")
+async def detect_anomalies(
+    request: AnomalyDetectionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Detect vegetation anomalies for a farm.
+    """
+    try:
+        from app.ml import NDVIAnomalyDetector
+
+        # Get satellite data
+        satellite_data = db.query(SatelliteImage).filter(
+            SatelliteImage.farm_id == request.farm_id
+        ).order_by(SatelliteImage.date.desc()).limit(request.days_back).all()
+
+        if not satellite_data:
+            raise HTTPException(status_code=404, detail="No satellite data found for farm")
+
+        # Prepare data
+        veg_data = []
+        for record in satellite_data:
+            veg_data.append({
+                'date': record.date,
+                'ndvi': record.ndvi or 0.5,
+                'ndwi': record.ndwi if hasattr(record, 'ndwi') else 0.3,
+                'evi': record.evi if hasattr(record, 'evi') else 0.4,
+                'farm_id': request.farm_id
+            })
+
+        # Detect anomalies
+        detector = NDVIAnomalyDetector()
+        results = detector.detect(veg_data)
+
+        # Summary
+        anomalies = [r for r in results if r.get('is_anomaly')]
+
+        return {
+            "farm_id": request.farm_id,
+            "total_records": len(results),
+            "anomalies_detected": len(anomalies),
+            "anomaly_rate": len(anomalies) / len(results) if results else 0,
+            "results": results,
+            "anomalies": anomalies
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Anomaly detection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Health Forecast Endpoints ============
+
+@router.post("/forecast-health")
+async def forecast_health(
+    request: HealthForecastRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Forecast vegetation health trends for a farm.
+    """
+    try:
+        from app.ml import HealthTrendForecaster
+
+        # Get historical data for training
+        satellite_data = db.query(SatelliteImage).filter(
+            SatelliteImage.farm_id == request.farm_id
+        ).order_by(SatelliteImage.date).all()
+
+        if len(satellite_data) < 14:
+            raise HTTPException(
+                status_code=400,
+                detail="Insufficient data for forecasting (need at least 14 days)"
+            )
+
+        # Prepare training data
+        historical_data = []
+        for record in satellite_data:
+            historical_data.append({
+                'date': record.date,
+                'health_score': (record.ndvi or 0.5) * 100,
+                'ndvi': record.ndvi or 0.5
+            })
+
+        # Train and forecast
+        forecaster = HealthTrendForecaster(forecast_days=request.forecast_days)
+
+        # Train on historical data
+        train_result = forecaster.train(historical_data)
+        if 'error' in train_result:
+            logger.warning(f"Training issue: {train_result['error']}")
+
+        # Generate forecast
+        forecast = forecaster.forecast(days=request.forecast_days)
+
+        # Add scenarios if requested
+        if request.include_scenarios:
+            forecast = forecaster.forecast_with_scenarios(
+                forecast,
+                scenarios=['drought', 'normal', 'wet']
+            )
+
+        return {
+            "farm_id": request.farm_id,
+            "forecast": forecast,
+            "training_info": train_result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Health forecast failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Model Management Endpoints ============
+
+@router.get("/models/status", response_model=ModelStatusResponse)
+async def get_model_status():
+    """
+    Get status of all ML models.
+    """
+    try:
+        from app.ml import get_registry
+
+        registry = get_registry()
+        health = registry.health_check()
+
+        return ModelStatusResponse(
+            overall=health['overall'],
+            models=health['models'],
+            timestamp=health['timestamp']
+        )
+
+    except Exception as e:
+        logger.error(f"Model status check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/models/list")
+async def list_models():
+    """
+    List all available ML models.
+    """
+    try:
+        from app.ml import get_registry
+
+        registry = get_registry()
+
+        return {
+            "available_models": registry.list_available_models(),
+            "saved_models": registry.list_saved_models(),
+            "metrics": registry.get_metrics()
+        }
+
+    except Exception as e:
+        logger.error(f"Model listing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/load-all")
+async def load_all_models():
+    """
+    Load all ML models into memory.
+    """
+    try:
+        from app.ml import get_registry
+
+        registry = get_registry()
+        results = registry.load_all_models()
+
+        return {
+            "loaded": results,
+            "health": registry.health_check()
+        }
+
+    except Exception as e:
+        logger.error(f"Model loading failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Intelligence Endpoints ============
+
+@router.get("/explain-risk/{farm_id}")
+async def explain_risk(
+    farm_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed explanation of risk factors for a farm.
+    """
+    try:
+        from app.ml import EnsembleRiskScorer, RiskIntelligence
+
+        farm_data = get_farm_data(farm_id, db)
+
+        # Calculate risk
+        scorer = EnsembleRiskScorer()
+        risk_result = scorer.calculate_risk(farm_data)
+
+        # Get intelligence analysis
+        features = {
+            'ndvi_trend': farm_data['vegetation'].get('ndvi_trend', 0),
+            'ndvi_anomaly': farm_data['vegetation'].get('ndvi', 0.5) - 0.6,
+            'rainfall_deficit': 30 - farm_data['weather'].get('rainfall_7d', 30),
+            'heat_stress_days': 0  # Would calculate from temp data
+        }
+
+        contributions = RiskIntelligence.calculate_feature_importance(
+            features, risk_result['overall_risk_score']
+        )
+        top_drivers = RiskIntelligence.get_top_risk_drivers(contributions)
+        explanation = RiskIntelligence.explain_risk_drivers(
+            top_drivers, risk_result['overall_risk_score']
+        )
+        time_to_impact = RiskIntelligence.calculate_time_to_impact(
+            risk_result['overall_risk_score'],
+            features['ndvi_trend']
+        )
+        recommendations = RiskIntelligence.generate_recommendations(
+            risk_result['overall_risk_score'],
+            top_drivers,
+            time_to_impact
+        )
+
+        return {
+            "farm_id": farm_id,
+            "risk_score": risk_result['overall_risk_score'],
+            "risk_level": risk_result['risk_level'],
+            "explanation": explanation,
+            "contributions": contributions,
+            "top_drivers": [{"factor": d[0], "contribution": d[1]} for d in top_drivers],
+            "time_to_impact": time_to_impact,
+            "recommendations": recommendations,
+            "scenarios": {
+                "irrigation": RiskIntelligence.simulate_scenario(
+                    risk_result['overall_risk_score'], 20, 'irrigation'
+                ),
+                "no_action": {
+                    "new_risk": risk_result['overall_risk_score'],
+                    "description": "Current trajectory"
+                }
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Risk explanation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -186,12 +186,15 @@ def predict_disease_risk(
     forecast = None
     if request.forecast_days > 0:
         forecast_engine = ShortTermForecastEngine()
-        weekly_forecast = forecast_engine.generate_weekly_summary(
-            farm, 
-            request.disease_name,
-            db
-        )
-        forecast = WeeklyForecastSummary(**weekly_forecast)
+        try:
+            weekly_forecast = forecast_engine.generate_weekly_summary(
+                farm, 
+                request.disease_name,
+                db
+            )
+            forecast = WeeklyForecastSummary(**weekly_forecast)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err))
     
     # Prepare response
     response = DiseasePredictionResponse(
@@ -273,12 +276,15 @@ def get_daily_forecast(
         )
     
     forecast_engine = ShortTermForecastEngine()
-    daily_forecasts = forecast_engine.generate_daily_forecast(
-        farm,
-        disease_name,
-        db,
-        forecast_days=days
-    )
+    try:
+        daily_forecasts = forecast_engine.generate_daily_forecast(
+            farm,
+            disease_name,
+            db,
+            forecast_days=days
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
     
     return [DailyForecast(**f) for f in daily_forecasts]
 
@@ -303,11 +309,14 @@ def get_weekly_forecast(
         )
     
     forecast_engine = ShortTermForecastEngine()
-    weekly_summary = forecast_engine.generate_weekly_summary(
-        farm,
-        disease_name,
-        db
-    )
+    try:
+        weekly_summary = forecast_engine.generate_weekly_summary(
+            farm,
+            disease_name,
+            db
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
     
     return WeeklyForecastSummary(**weekly_summary)
 

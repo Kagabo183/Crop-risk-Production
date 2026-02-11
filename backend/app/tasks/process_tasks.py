@@ -7,7 +7,14 @@ import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from app.db.database import SessionLocal
+from app.models.farm import Farm
+from app.models.disease import Disease, DiseasePrediction
+from app.models.alert import Alert
+from app.services.disease_intelligence import DiseaseModelEngine
+from app.services.weather_service import WeatherDataIntegrator
+from app.core.config import settings
 
 
 def compute_mean_ndvi_file(tif_path: str) -> float:
@@ -64,6 +71,12 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
     `DATABASE_URL` env var must be set for DB writes. If DB is unavailable, the task
     will write to `data/ndvi_means.json` as a fallback.
     """
+    if not settings.SATELLITE_LOCAL_STORAGE_ENABLED:
+        return {
+            'skipped': True,
+            'reason': 'local satellite storage disabled',
+            'file_path': file_path,
+        }
     mean = compute_mean_ndvi_file(file_path)
     db_url = os.environ.get('DATABASE_URL')
     record = {'file_path': file_path, 'mean_ndvi': mean}
@@ -116,6 +129,115 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
     finally:
         conn.close()
         engine.dispose()
+
+
+@celery_app.task(bind=True)
+def generate_disease_predictions_task(self):
+    """Generate disease predictions for all farms on a schedule."""
+    db = SessionLocal()
+    results = {
+        'farms_processed': 0,
+        'predictions_created': 0,
+        'errors': 0
+    }
+
+    try:
+        farms = db.query(Farm).all()
+        diseases = db.query(Disease).all()
+
+        if not farms or not diseases:
+            return {
+                'farms_processed': len(farms),
+                'predictions_created': 0,
+                'errors': 0,
+                'message': 'No farms or diseases found'
+            }
+
+        disease_engine = DiseaseModelEngine()
+        weather_integrator = WeatherDataIntegrator()
+
+        for farm in farms:
+            if farm.latitude is None or farm.longitude is None:
+                continue
+
+            results['farms_processed'] += 1
+
+            try:
+                weather_data = weather_integrator.integrate_multi_source_data(
+                    lat=farm.latitude,
+                    lon=farm.longitude,
+                    start_date=datetime.now() - timedelta(days=1),
+                    end_date=datetime.now()
+                )
+                disease_risk_factors = weather_integrator.calculate_disease_risk_factors(weather_data)
+                weather_data['disease_risk_factors'] = disease_risk_factors
+            except Exception:
+                results['errors'] += 1
+                continue
+
+            for disease in diseases:
+                try:
+                    disease_name_lower = disease.name.lower()
+
+                    if 'late blight' in disease_name_lower:
+                        disease_pred = disease_engine.predict_late_blight(weather_data)
+                    elif 'septoria' in disease_name_lower:
+                        disease_pred = disease_engine.predict_septoria_leaf_spot(weather_data)
+                    elif 'powdery mildew' in disease_name_lower:
+                        disease_pred = disease_engine.predict_powdery_mildew(weather_data)
+                    elif 'bacterial spot' in disease_name_lower:
+                        disease_pred = disease_engine.predict_bacterial_spot(weather_data)
+                    elif 'fusarium' in disease_name_lower:
+                        disease_pred = disease_engine.predict_fusarium_wilt(weather_data)
+                    else:
+                        continue
+
+                    prediction = DiseasePrediction(
+                        farm_id=farm.id,
+                        disease_id=disease.id,
+                        prediction_date=datetime.now().date(),
+                        forecast_horizon='current',
+                        risk_score=disease_pred['risk_score'],
+                        risk_level=disease_pred['risk_level'],
+                        infection_probability=disease_pred.get('infection_probability', 0.5),
+                        days_to_symptom_onset=disease_pred.get('days_to_symptoms'),
+                        weather_risk_score=disease_pred['risk_score'],
+                        risk_factors=disease_risk_factors,
+                        weather_conditions=weather_data,
+                        model_version=settings.DISEASE_MODEL_VERSION,
+                        confidence_score=disease_pred.get('confidence_score', 75.0),
+                        action_threshold_reached=disease_pred['risk_score'] >= 60,
+                        recommended_actions=disease_pred.get('recommended_actions', []),
+                        treatment_window=disease_pred.get('action_threshold'),
+                        estimated_yield_loss_pct=min(disease_pred['risk_score'] / 2, 50)
+                    )
+
+                    db.add(prediction)
+                    results['predictions_created'] += 1
+
+                    # Create alert for high/severe risk
+                    if disease_pred['risk_level'] in ['high', 'severe']:
+                        alert_message = (
+                            f"{disease.name} risk {disease_pred['risk_score']:.1f}/100 "
+                            f"({disease_pred['risk_level']}). "
+                            f"Action: {disease_pred.get('action_threshold', 'monitor')}."
+                        )
+                        db.add(Alert(
+                            farm_id=farm.id,
+                            message=alert_message,
+                            level=disease_pred['risk_level']
+                        ))
+
+                except Exception:
+                    results['errors'] += 1
+                    continue
+
+            db.commit()
+
+        return results
+
+    finally:
+        db.close()
     return record
 
 
@@ -125,6 +247,8 @@ def scan_and_enqueue(self, data_dir: str = 'data/sentinel2'):
     that do not yet have `mean_ndvi` recorded in the DB or JSON fallback.
     Returns a dict with enqueued file paths.
     """
+    if not settings.SATELLITE_LOCAL_STORAGE_ENABLED:
+        return {'enqueued': [], 'skipped': True, 'reason': 'local satellite storage disabled'}
     p = Path(data_dir)
     if not p.exists():
         return {'enqueued': []}
@@ -162,7 +286,7 @@ def scan_and_enqueue(self, data_dir: str = 'data/sentinel2'):
                 pass
 
     # fallback: read JSON file of previously computed means
-    if not seen:
+    if not seen and settings.SATELLITE_LOCAL_STORAGE_ENABLED:
         out = Path('data/ndvi_means.json')
         if out.exists():
             try:
@@ -188,105 +312,3 @@ def scan_and_enqueue(self, data_dir: str = 'data/sentinel2'):
     return {'enqueued': enqueued}
 
 
-@celery_app.task(bind=True)
-def auto_fetch_daily_data(self):
-    """Celery task to automatically fetch new satellite and weather data daily."""
-    from datetime import date, timedelta
-    from app.models.data import SatelliteImage, WeatherRecord
-    from sqlalchemy import create_engine, func
-    import random
-    
-    db_url = os.environ.get('DATABASE_URL')
-    if not db_url:
-        return {'error': 'DATABASE_URL not configured'}
-    
-    engine = create_engine(db_url, poolclass=NullPool, pool_pre_ping=True, pool_recycle=3600)
-    conn = engine.connect()
-    
-    try:
-        # Get latest satellite data date
-        result = conn.execute(text('SELECT MAX(date) FROM satellite_images')).scalar()
-        latest_sat_date = result if result else date(2025, 1, 1)
-        
-        # Get latest weather data date
-        result = conn.execute(text('SELECT MAX(date) FROM weather_records')).scalar()
-        latest_weather_date = result if result else date(2025, 1, 1)
-        
-        today = date.today()
-        sat_added = 0
-        weather_added = 0
-        
-        # Add satellite data
-        current_date = latest_sat_date + timedelta(days=1)
-        while current_date <= today:
-            num_images = random.randint(2, 5)
-            for i in range(num_images):
-                img_type = random.choice(["NDVI", "EVI", "RGB"])
-                filename = f"{img_type.lower()}_{current_date.strftime('%Y%m%d')}_{i:02d}.tif"
-                file_path = f"data/sentinel2/{filename}"
-                
-                conn.execute(text('''
-                    INSERT INTO satellite_images (date, region, image_type, file_path, extra_metadata)
-                    VALUES (:date, :region, :type, :fp, :meta)
-                '''), {
-                    'date': current_date,
-                    'region': 'Rwanda',
-                    'type': img_type,
-                    'fp': file_path,
-                    'meta': json.dumps({
-                        'cloud_cover': round(random.uniform(0, 30), 2),
-                        'resolution': '10m',
-                        'satellite': 'Sentinel-2A'
-                    })
-                })
-                sat_added += 1
-            current_date += timedelta(days=1)
-        
-        # Add weather data
-        current_date = latest_weather_date + timedelta(days=1)
-        while current_date <= today:
-            month = current_date.month
-            is_wet_season = month in [3, 4, 5, 10, 11, 12]
-            
-            if is_wet_season:
-                rainfall = random.uniform(5, 50)
-                temperature = random.uniform(18, 23)
-                drought_index = random.uniform(-1.5, 0.5)
-            else:
-                rainfall = random.uniform(0, 15)
-                temperature = random.uniform(20, 27)
-                drought_index = random.uniform(-0.5, 1.5)
-            
-            for source in ["CHIRPS", "ERA5", "NOAA"]:
-                conn.execute(text('''
-                    INSERT INTO weather_records (date, region, rainfall, temperature, drought_index, source, extra_metadata)
-                    VALUES (:date, :region, :rainfall, :temperature, :drought, :source, :meta)
-                '''), {
-                    'date': current_date,
-                    'region': 'Rwanda',
-                    'rainfall': round(rainfall + random.uniform(-2, 2), 2),
-                    'temperature': round(temperature + random.uniform(-1, 1), 2),
-                    'drought': round(drought_index + random.uniform(-0.2, 0.2), 2),
-                    'source': source,
-                    'meta': json.dumps({
-                        'humidity': round(random.uniform(60, 90), 1),
-                        'wind_speed': round(random.uniform(2, 15), 1)
-                    })
-                })
-                weather_added += 1
-            current_date += timedelta(days=1)
-        
-        conn.commit()
-        return {
-            'success': True,
-            'satellite_images_added': sat_added,
-            'weather_records_added': weather_added,
-            'latest_date': str(today)
-        }
-        
-    except Exception as e:
-        conn.rollback()
-        return {'error': str(e)}
-    finally:
-        conn.close()
-        engine.dispose()

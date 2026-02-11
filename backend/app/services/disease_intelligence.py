@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from app.models.disease import Disease, DiseasePrediction, DiseaseModelConfig, WeatherForecast
 from app.models.farm import Farm
 from app.services.weather_service import WeatherDataIntegrator
+from app.core.config import Settings
+
+settings = Settings()
 
 
 class DiseaseModelEngine:
@@ -531,6 +534,9 @@ class ShortTermForecastEngine:
             
             # Get weather forecast for this day
             weather_forecast = self._get_weather_forecast(farm, day_offset, db)
+
+            if settings.REQUIRE_REAL_WEATHER:
+                self._validate_real_weather_input(farm, weather_forecast, day_offset)
             
             # Calculate disease risk based on forecasted weather
             disease_risk = self._calculate_disease_risk(
@@ -632,10 +638,35 @@ class ShortTermForecastEngine:
                 datetime.now(),
                 datetime.now() + timedelta(days=day_offset)
             )
+            if isinstance(weather, dict):
+                source = str(weather.get('source') or '').lower()
+                if source not in {'climatology', 'fallback'} and weather.get('leaf_wetness') is None:
+                    factors = self.weather_integrator.calculate_disease_risk_factors(weather)
+                    leaf_wetness_hours = factors.get('leaf_wetness_hours')
+                    if leaf_wetness_hours is not None:
+                        weather['leaf_wetness'] = max(0.0, min(1.0, float(leaf_wetness_hours) / 24.0))
             return weather
         except:
             # Use climatology
             return self._climatology_forecast(day_offset)
+
+    def _validate_real_weather_input(self, farm: Farm, weather_data: Dict, day_offset: int) -> None:
+        if farm.latitude is None or farm.longitude is None:
+            raise ValueError("Real weather requires farm coordinates. Update farm latitude/longitude.")
+
+        if not isinstance(weather_data, dict) or not weather_data:
+            raise ValueError("Real weather data unavailable for forecast.")
+
+        source = str(weather_data.get('source') or '').lower()
+        if source in {'climatology', 'fallback'}:
+            raise ValueError("Fallback weather data is not allowed. Real forecast data unavailable.")
+
+        required_fields = ['temperature', 'humidity', 'rainfall']
+        missing = [field for field in required_fields if weather_data.get(field) is None]
+        if missing:
+            raise ValueError(
+                f"Real weather data missing required fields for day {day_offset}: {', '.join(missing)}."
+            )
     
     def _climatology_forecast(self, day_offset: int) -> Dict:
         """Fallback climatology-based forecast"""

@@ -25,49 +25,47 @@ def get_farms_with_satellite_data(db: Session = Depends(get_db)):
     """
     farms = db.query(Farm).all()
     result = []
-    
+
     for farm in farms:
-        # Get latest satellite image for this farm (from extra_metadata farm_id)
-        # Using Python filtering instead of JSON query for broader compatibility
-        all_images = (
+        # Get latest satellite image for this farm using the farm_id column
+        latest_image = (
             db.query(SatelliteImage)
-            .order_by(desc(SatelliteImage.date))
-            .all()
+            .filter(SatelliteImage.farm_id == farm.id)
+            .order_by(desc(SatelliteImage.acquisition_date))
+            .first()
         )
-        
-        latest_image = None
-        for img in all_images:
-            if img.extra_metadata and img.extra_metadata.get('farm_id') == farm.id:
-                latest_image = img
-                break
-        
+
         farm_data = {
             "id": farm.id,
             "name": farm.name,
             "location": farm.location,
             "area": farm.area,
-            "latitude": getattr(farm, 'latitude', None),
-            "longitude": getattr(farm, 'longitude', None),
+            "latitude": farm.latitude,
+            "longitude": farm.longitude,
             "ndvi": None,
             "ndvi_date": None,
             "image_type": None,
             "ndvi_status": "unknown",
-            "data_source": "simulated"  # Default to simulated
+            "data_source": "simulated"
         }
-        
-        if latest_image and latest_image.extra_metadata:
-            ndvi_value = latest_image.extra_metadata.get('ndvi_value')
+
+        if latest_image:
+            ndvi_value = latest_image.mean_ndvi
+            # Fallback: check extra_metadata if mean_ndvi is null
+            if ndvi_value is None and latest_image.extra_metadata:
+                ndvi_value = latest_image.extra_metadata.get('ndvi_value')
+
             if ndvi_value is not None:
                 farm_data["ndvi"] = round(ndvi_value, 4)
-                farm_data["ndvi_date"] = latest_image.date.isoformat() if latest_image.date else None
+                farm_data["ndvi_date"] = (
+                    latest_image.acquisition_date.isoformat()
+                    if latest_image.acquisition_date
+                    else latest_image.date.isoformat() if latest_image.date else None
+                )
                 farm_data["image_type"] = latest_image.image_type
-                
-                # Check if real sentinel-2 data
-                source = latest_image.extra_metadata.get('source', 'simulated')
-                farm_data["data_source"] = "real" if source == "sentinel2_real" else "simulated"
-                farm_data["tile"] = latest_image.extra_metadata.get('tile')
-                farm_data["cloud_cover"] = latest_image.extra_metadata.get('cloud_cover')
-                
+                farm_data["data_source"] = latest_image.source or "simulated"
+                farm_data["cloud_cover"] = latest_image.cloud_cover_percent
+
                 # Classify NDVI status
                 if ndvi_value >= 0.6:
                     farm_data["ndvi_status"] = "healthy"
@@ -75,9 +73,9 @@ def get_farms_with_satellite_data(db: Session = Depends(get_db)):
                     farm_data["ndvi_status"] = "moderate"
                 else:
                     farm_data["ndvi_status"] = "stressed"
-        
+
         result.append(farm_data)
-    
+
     return result
 
 
@@ -87,26 +85,32 @@ def get_farm_ndvi_history(farm_id: int, limit: int = 30, db: Session = Depends(g
     Get NDVI time series for a specific farm.
     Returns up to `limit` most recent satellite observations.
     """
-    # Get all images and filter by farm_id in Python
-    all_images = (
+    images = (
         db.query(SatelliteImage)
-        .order_by(desc(SatelliteImage.date))
+        .filter(SatelliteImage.farm_id == farm_id)
+        .filter(SatelliteImage.mean_ndvi.isnot(None))
+        .order_by(desc(SatelliteImage.acquisition_date))
+        .limit(limit)
         .all()
     )
-    
-    images = [img for img in all_images if img.extra_metadata and img.extra_metadata.get('farm_id') == farm_id][:limit]
-    
+
     history = []
     for img in images:
-        if img.extra_metadata and 'ndvi_value' in img.extra_metadata:
-            history.append({
-                "date": img.date.isoformat() if img.date else None,
-                "ndvi": round(img.extra_metadata['ndvi_value'], 4),
-                "image_type": img.image_type,
-                "cloud_coverage": img.extra_metadata.get('cloud_coverage', 0)
-            })
-    
-    # Sort chronologically
+        history.append({
+            "date": (
+                img.acquisition_date.isoformat()
+                if img.acquisition_date
+                else img.date.isoformat() if img.date else None
+            ),
+            "ndvi": round(img.mean_ndvi, 4),
+            "ndre": round(img.mean_ndre, 4) if img.mean_ndre else None,
+            "ndwi": round(img.mean_ndwi, 4) if img.mean_ndwi else None,
+            "evi": round(img.mean_evi, 4) if img.mean_evi else None,
+            "image_type": img.image_type,
+            "cloud_cover": img.cloud_cover_percent,
+        })
+
+    # Return chronologically
     history.reverse()
     return history
 

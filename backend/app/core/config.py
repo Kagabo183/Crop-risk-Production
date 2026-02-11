@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     DISEASE_MODEL_VERSION: str = "v1.0"
     ENABLE_DAILY_FORECASTS: bool = True
     ENABLE_WEEKLY_SUMMARIES: bool = True
+    REQUIRE_REAL_WEATHER: bool = True  # Disallow fallback/climatology weather inputs
 
     # Email (for alerts)
     SMTP_HOST: Optional[str] = None
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     S3_BUCKET_NAME: Optional[str] = None
+
+    # Satellite storage mode
+    SATELLITE_LOCAL_STORAGE_ENABLED: bool = True
     
     class Config:
         env_file = ".env"

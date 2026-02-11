@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy.orm import relationship
 from geoalchemy2 import Geometry
 from app.db.database import Base
 
@@ -14,3 +15,9 @@ class Farm(Base):
     owner_id = Column(Integer, nullable=True)  # FK to User, can be set up later
     latitude = Column(Float, nullable=True)  # GPS latitude
     longitude = Column(Float, nullable=True)  # GPS longitude
+    
+    # Relationships
+    satellite_images = relationship("SatelliteImage", back_populates="farm", cascade="all, delete-orphan")
+    weather_records = relationship("WeatherRecord", back_populates="farm", cascade="all, delete-orphan")
+    vegetation_health = relationship("VegetationHealth", back_populates="farm", cascade="all, delete-orphan")
+

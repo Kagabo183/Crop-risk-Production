@@ -1,68 +1,104 @@
 services:
   db:
     image: postgis/postgis:14-3.4
+    container_name: crop-risk-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: 1234
       POSTGRES_DB: crop_risk_db
-    command: ["-c", "max_connections=200"]
+    command: [ "-c", "max_connections=200" ]
     ports:
       - "5434:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./backend/docker/db-init:/docker-entrypoint-initdb.d:ro
-
-  web:
-    build: ./backend
-    restart: unless-stopped
-    env_file: .env
-    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-    environment:
-      - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
-      - REDIS_URL=redis
-    volumes:
-      - ./backend:/app:cached
-      - ./data:/app/data:cached
-      - ./logs:/app/logs:cached
-      - ./ml:/app/ml:cached
-      - ./data/earthengine:/root/.config/earthengine:cached
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: crop-risk-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crop-risk-backend
+    restart: unless-stopped
+    env_file: .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - SATELLITE_LOCAL_STORAGE_ENABLED=false
+      - MODEL_DIR=/app/data/models
+    volumes:
+      - ./backend:/app:cached
+      - ./data:/app/data:cached
+      - ./logs:/app/logs:cached
+      - ./ml:/app/ml:cached
+      # Google Earth Engine credentials
+      - ./data/earthengine:/root/.config/earthengine:cached
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crop-risk-worker
+    restart: unless-stopped
     command: celery -A app.tasks.celery_app.celery_app worker --loglevel=info --concurrency=6
     env_file: .env
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
       - ./ml:/app/ml:cached
+      # Google Earth Engine credentials for satellite tasks
       - ./data/earthengine:/root/.config/earthengine:cached
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - REDIS_URL=redis
+      - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
+      - SATELLITE_LOCAL_STORAGE_ENABLED=false
 
   beat:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crop-risk-beat
+    restart: unless-stopped
     command: celery -A app.tasks.celery_app.celery_app beat --loglevel=info
     env_file: .env
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
@@ -71,20 +107,30 @@ services:
       - ./data/earthengine:/root/.config/earthengine:cached
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - REDIS_URL=redis
+      - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
+      - SATELLITE_LOCAL_STORAGE_ENABLED=false
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: crop-risk-frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
+    depends_on:
+      - web
     volumes:
-      - ./frontend:/app
+      - ./frontend:/app:cached
       - /app/node_modules
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - VITE_API_TARGET=http://web:8000
 
 volumes:
   db_data:
+    driver: local
+
+networks:
+  default:
+    name: crop-risk-network
