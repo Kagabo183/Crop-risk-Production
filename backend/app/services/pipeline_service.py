@@ -93,12 +93,27 @@ class PipelineService:
         self._token_expires = now + timedelta(seconds=data.get('expires_in', 3600) - 60)
         return self._access_token
     
-    def search_latest_products(self, max_cloud_cover: float = 20.0, days_back: int = 30) -> List[Dict]:
-        """Search for latest Sentinel-2 products over Rwanda"""
+    def search_latest_products(
+        self,
+        max_cloud_cover: float = 20.0,
+        days_back: int = 30,
+        start_date_str: str = None,
+        end_date_str: str = None,
+    ) -> List[Dict]:
+        """Search for latest Sentinel-2 products over Rwanda.
+
+        If start_date_str / end_date_str are given (YYYY-MM-DD) they override days_back.
+        """
         token = self.get_access_token()
-        
-        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT00:00:00.000Z')
-        end_date = datetime.now().strftime('%Y-%m-%dT23:59:59.999Z')
+
+        if start_date_str:
+            start_date = f"{start_date_str}T00:00:00.000Z"
+        else:
+            start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%dT00:00:00.000Z')
+        if end_date_str:
+            end_date = f"{end_date_str}T23:59:59.999Z"
+        else:
+            end_date = datetime.now().strftime('%Y-%m-%dT23:59:59.999Z')
         
         bbox = self.RWANDA_BBOX
         polygon = f"POLYGON(({bbox['min_lon']} {bbox['min_lat']}, {bbox['max_lon']} {bbox['min_lat']}, {bbox['max_lon']} {bbox['max_lat']}, {bbox['min_lon']} {bbox['max_lat']}, {bbox['min_lon']} {bbox['min_lat']}))"
@@ -384,7 +399,12 @@ class PipelineService:
         
         return affected
     
-    def run_full_pipeline(self, max_products: int = 5) -> Dict[str, Any]:
+    def run_full_pipeline(
+        self,
+        max_products: int = 5,
+        start_date_str: str = None,
+        end_date_str: str = None,
+    ) -> Dict[str, Any]:
         """Run the full data fetching and processing pipeline"""
         result = {
             'status': 'running',
@@ -394,10 +414,13 @@ class PipelineService:
             'farms_updated': 0,
             'errors': []
         }
-        
+
         try:
             # Search for products
-            products = self.search_latest_products()
+            products = self.search_latest_products(
+                start_date_str=start_date_str,
+                end_date_str=end_date_str,
+            )
             result['products_searched'] = len(products)
             
             # Process unique tiles

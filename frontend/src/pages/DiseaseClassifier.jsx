@@ -102,10 +102,23 @@ export default function DiseaseClassifier() {
               onChange={e => handleFile(e.target.files[0])}
             />
 
-            {/* Preview */}
+            {/* Preview: original + Grad-CAM side by side */}
             {preview && (
-              <div className="image-preview">
-                <img src={preview} alt="Leaf preview" />
+              <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--text-secondary)' }}>Original</div>
+                  <div className="image-preview">
+                    <img src={preview} alt="Leaf preview" />
+                  </div>
+                </div>
+                {result?.gradcam_base64 && (
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--text-secondary)' }}>Grad-CAM — Disease Region</div>
+                    <div className="image-preview" style={{ border: '2px solid var(--danger)' }}>
+                      <img src={`data:image/png;base64,${result.gradcam_base64}`} alt="Grad-CAM heatmap" />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

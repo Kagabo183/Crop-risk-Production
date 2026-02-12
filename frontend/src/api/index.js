@@ -7,8 +7,47 @@ const api = axios.create({
   timeout: 30000,
 })
 
+// ── JWT Token Interceptor ──
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('token')
+      window.location.href = '/login'
+    }
+    return Promise.reject(err)
+  }
+)
+
+// ── Auth ──
+export const loginUser = (email, password) => {
+  const form = new URLSearchParams()
+  form.append('username', email)
+  form.append('password', password)
+  return api.post('/auth/login', form, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  })
+}
+export const registerUser = (data) => api.post('/auth/register', data)
+export const getProfile = () => api.get('/auth/me')
+export const updateProfile = (data) => api.put('/auth/me', data)
+export const getUsers = () => api.get('/auth/users')
+export const changeUserRole = (userId, role) => api.put(`/auth/users/${userId}/role`, { role })
+export const toggleUserActive = (userId) => api.put(`/auth/users/${userId}/toggle-active`)
+
 // ── Farms ──
 export const getFarms = () => api.get('/farms/')
+export const createFarm = (data) => api.post('/farms/', data)
+export const updateFarm = (id, data) => api.put(`/farms/${id}`, data)
+export const deleteFarm = (id) => api.delete(`/farms/${id}`)
 
 // ── Stress Monitoring ──
 export const getVegetationHealth = (farmId, daysBack = 90) =>
@@ -41,8 +80,21 @@ export const triggerSatelliteDownload = (farmId, daysBack = 30) =>
 // ── Farm Satellite ──
 export const getFarmSatellite = () => api.get('/farm-satellite/')
 
-export const getNdviHistory = (farmId, limit = 30) =>
-  api.get(`/farm-satellite/history/${farmId}`, { params: { limit } })
+export const seedSatelliteData = () => api.post('/seed-all')
+export const fetchRealData = (daysBack = 90, weatherDays = 7) =>
+  api.post('/fetch-real-data', null, { params: { days_back: daysBack, weather_days: weatherDays }, timeout: 120000 })
+export const getFetchStatus = () => api.get('/fetch-real-data/status')
+
+export const getNdviHistory = (farmId, limit = 30, startDate, endDate) =>
+  api.get(`/farm-satellite/history/${farmId}`, {
+    params: { limit, start_date: startDate || undefined, end_date: endDate || undefined },
+  })
+
+
+export const fetchPipelineData = (startDate, endDate) =>
+  api.post('/pipeline/fetch-data', null, {
+    params: { start_date: startDate || undefined, end_date: endDate || undefined },
+  })
 
 // ── ML ──
 export const classifyDisease = (file, cropType) => {
@@ -94,6 +146,10 @@ export const getDiseaseStatistics = (farmId, days = 30) =>
 
 export const getFarmPredictions = (farmId, limit = 10) =>
   api.get(`/diseases/predictions/farm/${farmId}`, { params: { limit } })
+
+// ── Early Warning ──
+export const getEarlyWarnings = () => api.get('/early-warning/')
+export const fetchWeatherAll = () => api.post('/early-warning/fetch-weather')
 
 // ── Health ──
 export const getHealth = () => api.get('/health')

@@ -4,7 +4,7 @@ Pipeline API Endpoints
 - Manual data fetch trigger
 - Pipeline status
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -47,36 +47,45 @@ def get_pipeline_status() -> Dict[str, Any]:
 
 
 @router.post("/fetch-data")
-async def trigger_data_fetch(background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    """Manually trigger satellite data fetching"""
+async def trigger_data_fetch(
+    background_tasks: BackgroundTasks,
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+) -> Dict[str, Any]:
+    """Manually trigger satellite data fetching for an optional date range."""
     global _pipeline_status
-    
+
     if _pipeline_status['is_running']:
         return {
             'status': 'already_running',
             'message': 'Pipeline is already running. Please wait for completion.'
         }
-    
+
     # Run in background
-    background_tasks.add_task(run_pipeline_task)
-    
+    background_tasks.add_task(run_pipeline_task, start_date, end_date)
+
     return {
         'status': 'started',
         'message': 'Data fetch pipeline started. Check /pipeline/status for progress.',
-        'started_at': datetime.now().isoformat()
+        'started_at': datetime.now().isoformat(),
+        'date_range': {'start': start_date, 'end': end_date},
     }
 
 
-def run_pipeline_task():
+def run_pipeline_task(start_date: str = None, end_date: str = None):
     """Background task to run the pipeline"""
     global _pipeline_status
-    
+
     _pipeline_status['is_running'] = True
     _pipeline_status['last_run'] = datetime.now().isoformat()
-    
+
     try:
         pipeline = get_pipeline_service()
-        result = pipeline.run_full_pipeline(max_products=5)
+        result = pipeline.run_full_pipeline(
+            max_products=5,
+            start_date_str=start_date,
+            end_date_str=end_date,
+        )
         _pipeline_status['last_result'] = result
     except Exception as e:
         _pipeline_status['last_result'] = {

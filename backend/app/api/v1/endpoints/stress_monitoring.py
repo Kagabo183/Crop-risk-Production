@@ -11,6 +11,8 @@ from app.services.stress_detection_service import StressDetectionService
 from app.models.data import VegetationHealth, SatelliteImage
 from app.models.farm import Farm
 from app.tasks.satellite_tasks import process_single_farm
+from app.core.auth import get_current_active_user, check_farm_access
+from app.models.user import User as UserModel
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -48,7 +50,8 @@ class TriggerDownloadRequest(BaseModel):
 def get_vegetation_health_timeseries(
     farm_id: int,
     days_back: int = 90,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get vegetation health time series for a farm
@@ -64,6 +67,8 @@ def get_vegetation_health_timeseries(
     farm = db.query(Farm).filter(Farm.id == farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    
+    check_farm_access(farm, current_user)
     
     # Get vegetation health data
     end_date = datetime.now().date()
@@ -92,7 +97,8 @@ def get_vegetation_health_timeseries(
 @router.get("/stress-assessment/{farm_id}", response_model=StressAssessmentResponse)
 def get_stress_assessment(
     farm_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get current stress assessment for a farm
@@ -108,6 +114,8 @@ def get_stress_assessment(
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
     
+    check_farm_access(farm, current_user)
+    
     # Get stress assessment
     stress_service = StressDetectionService()
     assessment = stress_service.calculate_composite_health_score(db, farm_id)
@@ -118,7 +126,8 @@ def get_stress_assessment(
 @router.get("/indices/{farm_id}")
 def get_latest_vegetation_indices(
     farm_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get latest vegetation indices for a farm
@@ -133,6 +142,8 @@ def get_latest_vegetation_indices(
     farm = db.query(Farm).filter(Farm.id == farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    
+    check_farm_access(farm, current_user)
     
     # Get latest satellite image
     latest_image = db.query(SatelliteImage).filter(
@@ -161,7 +172,8 @@ def get_latest_vegetation_indices(
 def trigger_satellite_download(
     request: TriggerDownloadRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Manually trigger satellite data download for a farm
@@ -176,6 +188,8 @@ def trigger_satellite_download(
     farm = db.query(Farm).filter(Farm.id == request.farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    
+    check_farm_access(farm, current_user)
     
     if not farm.latitude or not farm.longitude:
         raise HTTPException(status_code=400, detail="Farm has no coordinates")
@@ -194,7 +208,8 @@ def trigger_satellite_download(
 @router.get("/stress-zones/{farm_id}")
 def get_stress_zones(
     farm_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get stress zones within a farm (GeoJSON format)
@@ -209,6 +224,8 @@ def get_stress_zones(
     farm = db.query(Farm).filter(Farm.id == farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    
+    check_farm_access(farm, current_user)
     
     # Get stress assessment
     stress_service = StressDetectionService()
@@ -242,7 +259,8 @@ def get_stress_zones(
 def get_drought_assessment(
     farm_id: int,
     days_back: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get detailed drought stress assessment
@@ -258,6 +276,8 @@ def get_drought_assessment(
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
     
+    check_farm_access(farm, current_user)
+    
     stress_service = StressDetectionService()
     drought = stress_service.detect_drought_stress(db, farm_id, days_back)
     
@@ -268,7 +288,8 @@ def get_drought_assessment(
 def get_water_stress_assessment(
     farm_id: int,
     days_back: int = 14,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get detailed water stress assessment
@@ -284,6 +305,8 @@ def get_water_stress_assessment(
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
     
+    check_farm_access(farm, current_user)
+    
     stress_service = StressDetectionService()
     water_stress = stress_service.detect_water_stress(db, farm_id, days_back)
     
@@ -294,7 +317,8 @@ def get_water_stress_assessment(
 def get_heat_stress_assessment(
     farm_id: int,
     days_back: int = 14,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get detailed heat stress assessment
@@ -309,6 +333,8 @@ def get_heat_stress_assessment(
     farm = db.query(Farm).filter(Farm.id == farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+        
+    check_farm_access(farm, current_user)
     
     stress_service = StressDetectionService()
     heat_stress = stress_service.detect_heat_stress(db, farm_id, days_back)
@@ -320,7 +346,8 @@ def get_heat_stress_assessment(
 def get_nutrient_assessment(
     farm_id: int,
     days_back: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get detailed nutrient deficiency assessment
@@ -335,6 +362,8 @@ def get_nutrient_assessment(
     farm = db.query(Farm).filter(Farm.id == farm_id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    
+    check_farm_access(farm, current_user)
     
     stress_service = StressDetectionService()
     nutrient = stress_service.detect_nutrient_deficiency(db, farm_id, days_back)

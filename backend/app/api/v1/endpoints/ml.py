@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.farm import Farm
-from app.models.data import SatelliteImage, WeatherRecord
+from app.core.auth import get_current_active_user, check_farm_access, require_any_authenticated
+from app.models.user import User as UserModel
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class DiseaseClassifyResponse(BaseModel):
     top5: list
     treatment: dict
     crop_type: str
+    gradcam_base64: Optional[str] = None
 
 
 class RiskAssessmentRequest(BaseModel):
@@ -122,7 +124,7 @@ def get_farm_data(farm_id: int, db: Session) -> dict:
     ).order_by(WeatherRecord.date.desc()).limit(30).all()
 
     # Compute vegetation statistics
-    ndvi_values = [s.ndvi for s in satellite_data if s.ndvi is not None]
+    ndvi_values = [s.mean_ndvi for s in satellite_data if s.mean_ndvi is not None]
     vegetation = {
         'ndvi': ndvi_values[0] if ndvi_values else 0.5,
         'ndvi_mean': sum(ndvi_values) / len(ndvi_values) if ndvi_values else 0.5,
@@ -175,7 +177,8 @@ def get_farm_data(farm_id: int, db: Session) -> dict:
 @router.post("/classify-disease", response_model=DiseaseClassifyResponse)
 async def classify_disease(
     file: UploadFile = File(...),
-    crop_type: Optional[str] = Query(default=None, description="Optional crop filter")
+    crop_type: Optional[str] = Query(default=None, description="Optional crop filter"),
+    current_user: UserModel = Depends(require_any_authenticated),
 ):
     """
     Classify plant disease from uploaded leaf image.
@@ -192,9 +195,9 @@ async def classify_disease(
             content = await file.read()
             f.write(content)
 
-        # Classify
+        # Classify with Grad-CAM explainability
         classifier = DiseaseClassifier(crop_type=crop_type)
-        result = classifier.predict(str(file_path))
+        result = classifier.predict_with_gradcam(str(file_path))
 
         # Clean up
         file_path.unlink(missing_ok=True)
@@ -206,7 +209,8 @@ async def classify_disease(
             is_healthy=result.get('is_healthy'),
             top5=result.get('top5', []),
             treatment=result.get('treatment', {}),
-            crop_type=result.get('crop_type', crop_type or 'unknown')
+            crop_type=result.get('crop_type', crop_type or 'unknown'),
+            gradcam_base64=result.get('gradcam_base64'),
         )
 
     except Exception as e:
@@ -238,7 +242,8 @@ async def get_supported_diseases():
 @router.post("/risk-assessment", response_model=RiskAssessmentResponse)
 async def calculate_risk_assessment(
     request: RiskAssessmentRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Calculate comprehensive risk assessment for a farm.
@@ -254,6 +259,12 @@ async def calculate_risk_assessment(
         from app.ml import EnsembleRiskScorer
 
         # Get farm data
+        # Check access before processing
+        farm = db.query(Farm).filter(Farm.id == request.farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
+
         farm_data = get_farm_data(request.farm_id, db)
 
         # Calculate risk
@@ -281,13 +292,20 @@ async def calculate_risk_assessment(
 @router.get("/risk-assessment/{farm_id}")
 async def get_risk_assessment(
     farm_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get risk assessment for a farm (shortcut GET endpoint).
     """
     try:
         from app.ml import EnsembleRiskScorer
+        
+        # Check access
+        farm = db.query(Farm).filter(Farm.id == farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
 
         farm_data = get_farm_data(farm_id, db)
         scorer = EnsembleRiskScorer()
@@ -305,7 +323,8 @@ async def get_risk_assessment(
 @router.get("/risk-assessment/batch")
 async def batch_risk_assessment(
     farm_ids: List[int] = Query(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Calculate risk assessment for multiple farms.
@@ -313,7 +332,23 @@ async def batch_risk_assessment(
     try:
         from app.ml import EnsembleRiskScorer
 
-        farms_data = [get_farm_data(fid, db) for fid in farm_ids]
+        from app.ml import EnsembleRiskScorer
+        
+        # Filter farm_ids based on access
+        accessible_farms = []
+        for fid in farm_ids:
+            farm = db.query(Farm).filter(Farm.id == fid).first()
+            if farm:
+                try:
+                    if check_farm_access(farm, current_user):
+                        accessible_farms.append(fid)
+                except HTTPException:
+                    pass
+        
+        if not accessible_farms:
+             return {"assessments": [], "summary": {}}
+
+        farms_data = [get_farm_data(fid, db) for fid in accessible_farms]
         scorer = EnsembleRiskScorer()
 
         results = scorer.batch_calculate(farms_data)
@@ -336,7 +371,8 @@ async def batch_risk_assessment(
 @router.post("/predict-yield", response_model=YieldPredictionResponse)
 async def predict_yield(
     request: YieldPredictionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Predict crop yield for a farm based on current conditions.
@@ -345,6 +381,11 @@ async def predict_yield(
         from app.ml import YieldPredictor
 
         farm_data = get_farm_data(request.farm_id, db)
+        
+        # Check access (get_farm_data fetches farm but doesn't check owner)
+        # We need to fetch farm object separately to check owner/district
+        farm = db.query(Farm).filter(Farm.id == request.farm_id).first()
+        check_farm_access(farm, current_user)
 
         crop_type = request.crop_type or farm_data.get('crop_type', 'potato')
         predictor = YieldPredictor(crop_type=crop_type)
@@ -371,13 +412,20 @@ async def predict_yield(
 async def get_yield_prediction(
     farm_id: int,
     crop_type: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get yield prediction for a farm (shortcut GET endpoint).
     """
     try:
         from app.ml import YieldPredictor
+        
+        # Check access
+        farm = db.query(Farm).filter(Farm.id == farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
 
         farm_data = get_farm_data(farm_id, db)
         crop_type = crop_type or farm_data.get('crop_type', 'potato')
@@ -399,7 +447,8 @@ async def get_yield_prediction(
 @router.post("/detect-anomalies")
 async def detect_anomalies(
     request: AnomalyDetectionRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Detect vegetation anomalies for a farm.
@@ -408,6 +457,12 @@ async def detect_anomalies(
         from app.ml import NDVIAnomalyDetector
 
         # Get satellite data
+        # Check access first
+        farm = db.query(Farm).filter(Farm.id == request.farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
+
         satellite_data = db.query(SatelliteImage).filter(
             SatelliteImage.farm_id == request.farm_id
         ).order_by(SatelliteImage.date.desc()).limit(request.days_back).all()
@@ -420,9 +475,9 @@ async def detect_anomalies(
         for record in satellite_data:
             veg_data.append({
                 'date': record.date,
-                'ndvi': record.ndvi or 0.5,
-                'ndwi': record.ndwi if hasattr(record, 'ndwi') else 0.3,
-                'evi': record.evi if hasattr(record, 'evi') else 0.4,
+                'ndvi': record.mean_ndvi or 0.5,
+                'ndwi': record.mean_ndwi if record.mean_ndwi is not None else 0.3,
+                'evi': record.mean_evi if record.mean_evi is not None else 0.4,
                 'farm_id': request.farm_id
             })
 
@@ -454,7 +509,8 @@ async def detect_anomalies(
 @router.post("/forecast-health")
 async def forecast_health(
     request: HealthForecastRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Forecast vegetation health trends for a farm.
@@ -463,6 +519,13 @@ async def forecast_health(
         from app.ml import HealthTrendForecaster
 
         # Get historical data for training
+        
+        # Check access
+        farm = db.query(Farm).filter(Farm.id == request.farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
+
         satellite_data = db.query(SatelliteImage).filter(
             SatelliteImage.farm_id == request.farm_id
         ).order_by(SatelliteImage.date).all()
@@ -478,8 +541,8 @@ async def forecast_health(
         for record in satellite_data:
             historical_data.append({
                 'date': record.date,
-                'health_score': (record.ndvi or 0.5) * 100,
-                'ndvi': record.ndvi or 0.5
+                'health_score': (record.mean_ndvi or 0.5) * 100,
+                'ndvi': record.mean_ndvi or 0.5
             })
 
         # Train and forecast
@@ -584,13 +647,20 @@ async def load_all_models():
 @router.get("/explain-risk/{farm_id}")
 async def explain_risk(
     farm_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
 ):
     """
     Get detailed explanation of risk factors for a farm.
     """
     try:
         from app.ml import EnsembleRiskScorer, RiskIntelligence
+        
+        # Check access
+        farm = db.query(Farm).filter(Farm.id == farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
 
         farm_data = get_farm_data(farm_id, db)
 

@@ -235,8 +235,16 @@ class ModelRegistry:
         Check health status of all models.
 
         Returns:
-            Health status dictionary
+            Health status dictionary with accurate model capabilities
         """
+        # Models that can work with defaults (no training required)
+        DEFAULT_CAPABLE = {
+            'anomaly_detector',  # Uses Isolation Forest with default params
+            'yield_predictor',   # Has default crop yield estimates
+            'trend_forecaster',  # Prophet uses built-in seasonality
+            'ensemble_scorer'    # Combines other models with research algorithms
+        }
+        
         status = {
             'overall': 'healthy',
             'models': {},
@@ -245,7 +253,8 @@ class ModelRegistry:
             'timestamp': datetime.utcnow().isoformat()
         }
 
-        issues = []
+        ready_count = 0
+        warnings = []
 
         for model_type, config in self.MODEL_TYPES.items():
             model_status = {
@@ -264,21 +273,44 @@ class ModelRegistry:
             model_status['has_saved_weights'] = len(saved_files) > 0
             model_status['saved_files'] = [f.name for f in saved_files]
 
-            # Determine status
+            # Determine real status based on capabilities
             if loaded:
                 model_status['status'] = 'ready'
+                model_status['trained'] = saved_files  # Shows if using custom weights
+                ready_count += 1
             elif saved_files:
                 model_status['status'] = 'available'
+                model_status['trained'] = True
+                ready_count += 1
+            elif model_type in DEFAULT_CAPABLE:
+                # Model works with defaults, but not trained on user data
+                model_status['status'] = 'ready'
+                model_status['trained'] = False
+                model_status['note'] = 'Using default parameters (not trained on your data)'
+                warnings.append(f"{model_type} using defaults - consider training with your data")
+                ready_count += 1
             else:
-                model_status['status'] = 'not_trained'
-                issues.append(f"{model_type} has no trained weights")
+                # Model requires training (e.g., disease_classifier needs weights)
+                model_status['status'] = 'requires_training'
+                model_status['trained'] = False
+                warnings.append(f"{model_type} requires trained weights to function")
 
             status['models'][model_type] = model_status
 
-        # Overall status
-        if issues:
-            status['overall'] = 'degraded'
-            status['issues'] = issues
+        # Update overall status
+        status['ready_count'] = ready_count
+        status['total_count'] = len(self.MODEL_TYPES)
+        
+        if warnings:
+            status['warnings'] = warnings
+        
+        # Overall is healthy if all models are at least functional
+        if ready_count == len(self.MODEL_TYPES):
+            status['overall'] = 'healthy'
+        elif ready_count > 0:
+            status['overall'] = 'partially_ready'
+        else:
+            status['overall'] = 'not_ready'
 
         return status
 

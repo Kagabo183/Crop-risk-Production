@@ -7,6 +7,7 @@ from app.db.database import SessionLocal
 from app.services.satellite_service import SatelliteDataService
 from app.services.stress_detection_service import StressDetectionService
 from app.models.farm import Farm
+from app.models.alert import Alert
 import logging
 
 logger = logging.getLogger(__name__)
@@ -126,8 +127,34 @@ def detect_stress_zones():
                 # Create alerts for high stress
                 if assessment['stress_score'] >= 60:
                     results['high_stress_farms'] += 1
-                    # Alert creation would go here
-                    logger.warning(f"High stress detected for farm {farm.id}: {assessment['stress_level']}")
+                    
+                    # Check for existing alert today to avoid spam
+                    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    existing_alert = db.query(Alert).filter(
+                        Alert.farm_id == farm.id,
+                        Alert.created_at >= today_start
+                    ).first()
+                    
+                    if not existing_alert:
+                        level_map = {'severe': 'critical', 'high': 'high', 'moderate': 'medium'}
+                        stress_level = assessment.get('stress_level', 'high')
+                        # Map to alert levels, default to high since score >= 60
+                        alert_level = level_map.get(stress_level, 'high') 
+                        
+                        primary = assessment.get('primary_stress', 'General')
+                        message = assessment.get('message', f"High {primary} stress detected. Score: {assessment['stress_score']}")
+
+                        new_alert = Alert(
+                            farm_id=farm.id,
+                            message=message,
+                            level=alert_level
+                        )
+                        db.add(new_alert)
+                        db.commit()
+                        results['alerts_created'] += 1
+                        logger.warning(f"Created alert for farm {farm.id}: {alert_level}")
+                    else:
+                        logger.info(f"Alert already exists for farm {farm.id} today")
                     
             except Exception as e:
                 logger.error(f"Failed to detect stress for farm {farm.id}: {e}")

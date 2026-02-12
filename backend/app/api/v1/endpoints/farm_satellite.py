@@ -1,12 +1,13 @@
 """
 API endpoint to get the latest satellite data (NDVI) for each farm
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, date
 from pathlib import Path
+import random
 
 from geoalchemy2.shape import to_shape
 
@@ -14,16 +15,27 @@ from app.db.database import get_db
 from app.models.farm import Farm
 from app.models.data import SatelliteImage
 from app.services.pipeline_service import get_pipeline_service
+from app.core.auth import get_current_active_user, check_farm_access
+from app.models.user import User as UserModel
 
 router = APIRouter()
 
 @router.get("/", response_model=List[Dict[str, Any]])
-def get_farms_with_satellite_data(db: Session = Depends(get_db)):
+def get_farms_with_satellite_data(
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
     """
     Get all farms with their latest satellite NDVI data.
     Returns farm details plus latest NDVI value, date, and image type.
     """
-    farms = db.query(Farm).all()
+    query = db.query(Farm)
+    if current_user.role == "farmer":
+        query = query.filter(Farm.owner_id == current_user.id)
+    elif current_user.role == "agronomist" and current_user.district:
+        query = query.filter(Farm.location == current_user.district)
+        
+    farms = query.all()
     result = []
 
     for farm in farms:
@@ -80,16 +92,39 @@ def get_farms_with_satellite_data(db: Session = Depends(get_db)):
 
 
 @router.get("/history/{farm_id}")
-def get_farm_ndvi_history(farm_id: int, limit: int = 30, db: Session = Depends(get_db)):
+def get_farm_ndvi_history(
+    farm_id: int,
+    limit: int = 30,
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
     """
     Get NDVI time series for a specific farm.
     Returns up to `limit` most recent satellite observations.
+    Optionally filter by start_date and end_date.
     """
-    images = (
+    # Verify farm access
+    farm = db.query(Farm).filter(Farm.id == farm_id).first()
+    if not farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+        
+    check_farm_access(farm, current_user)
+
+    query = (
         db.query(SatelliteImage)
         .filter(SatelliteImage.farm_id == farm_id)
         .filter(SatelliteImage.mean_ndvi.isnot(None))
-        .order_by(desc(SatelliteImage.acquisition_date))
+    )
+
+    if start_date:
+        query = query.filter(SatelliteImage.date >= date.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(SatelliteImage.date <= date.fromisoformat(end_date))
+
+    images = (
+        query.order_by(desc(SatelliteImage.acquisition_date))
         .limit(limit)
         .all()
     )
@@ -159,3 +194,59 @@ def recompute_farm_satellite(farm_id: int, db: Session = Depends(get_db)) -> Dic
         "tiles_processed": tiles_processed,
         "total_records_affected": total_affected,
     }
+
+@router.post("/seed")
+def seed_satellite_data(db: Session = Depends(get_db)):
+    """Generate simulated satellite data for demo purposes"""
+    farms = db.query(Farm).all()
+    count = 0
+    
+    # Clear existing simulated data first to avoid duplicates
+    db.query(SatelliteImage).filter(SatelliteImage.extra_metadata["source"].astext == "simulated").delete(synchronize_session=False)
+    
+    for farm in farms:
+        # Generate 6 months of data
+        start_date = datetime.now() - timedelta(days=180)
+        current_date = start_date
+        
+        # Base healthy trend (random per farm)
+        base_ndvi = random.uniform(0.5, 0.7)
+        
+        while current_date <= datetime.now():
+            days_passed = (current_date - start_date).days
+            # Slight seasonal curve (sine-like)
+            import math
+            seasonal = 0.1 * math.sin(days_passed / 30)
+            
+            date_ndvi = base_ndvi + seasonal + random.uniform(-0.05, 0.05)
+            date_ndvi = max(0.1, min(0.9, date_ndvi))
+            
+            # 10% chance of 'cloudy' day (bad data or skips)
+            cloud_cover = random.uniform(0, 100)
+            if cloud_cover > 80:
+                # cloudy observation
+                date_ndvi = date_ndvi * 0.6 # drop due to clouds?
+            
+            sim_image = SatelliteImage(
+                farm_id=farm.id,
+                date=current_date.date(),
+                acquisition_date=current_date,
+                mean_ndvi=float(round(date_ndvi, 4)),
+                cloud_cover_percent=cloud_cover,
+                image_type="Synthesized",
+                source="simulated",
+                extra_metadata={
+                    "source": "simulated",
+                    "ndvi_value": float(round(date_ndvi, 4)),
+                    "simulated": True
+                }
+            )
+            db.add(sim_image)
+            count += 1
+            current_date += timedelta(days=random.randint(5, 10))
+            
+    db.commit()
+    return {"message": f"Generated {count} simulated records for {len(farms)} farms"}
+
+
+

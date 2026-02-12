@@ -1,4 +1,5 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard,
   MapPin,
@@ -8,34 +9,59 @@ import {
   Satellite,
   TrendingUp,
   Cpu,
+  AlertTriangle,
+  Users,
+  LogOut,
 } from 'lucide-react'
 
-const NAV = [
-  { label: 'Overview', items: [
-    { to: '/', icon: LayoutDashboard, text: 'Dashboard' },
-    { to: '/farms', icon: MapPin, text: 'Farms' },
-  ]},
-  { label: 'Analysis', items: [
-    { to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' },
-    { to: '/risk-assessment', icon: ShieldAlert, text: 'Risk Assessment' },
-    { to: '/stress-monitoring', icon: Activity, text: 'Stress Monitoring' },
-  ]},
-  { label: 'Data', items: [
-    { to: '/satellite', icon: Satellite, text: 'Satellite Data' },
-    { to: '/disease-forecasts', icon: TrendingUp, text: 'Disease Forecasts' },
-    { to: '/ml-models', icon: Cpu, text: 'ML Models' },
-  ]},
-]
+const ROLE_BADGE = {
+  admin: { label: 'Admin', color: '#e74c3c' },
+  agronomist: { label: 'Agronomist', color: '#3498db' },
+  farmer: { label: 'Farmer', color: '#2ecc71' },
+  viewer: { label: 'Viewer', color: '#9b59b6' },
+}
 
 export default function Sidebar({ open, onClose }) {
-  const location = useLocation()
+  const { user, logout, hasRole } = useAuth()
+
+  const badge = ROLE_BADGE[user?.role] || ROLE_BADGE.farmer
+
+  const NAV = [
+    {
+      label: 'Overview', items: [
+        { to: '/', icon: LayoutDashboard, text: 'Dashboard' },
+        ...(hasRole('admin', 'agronomist', 'farmer') ?
+          [{ to: '/farms', icon: MapPin, text: 'Farms' }] : []),
+      ]
+    },
+    {
+      label: 'Analysis', items: [
+        ...(hasRole('admin', 'agronomist', 'farmer') ?
+          [{ to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' }] : []),
+        ...(hasRole('admin', 'agronomist', 'viewer') ?
+          [{ to: '/risk-assessment', icon: ShieldAlert, text: 'Risk Assessment' }] : []),
+        { to: '/stress-monitoring', icon: Activity, text: 'Stress Monitoring' },
+        { to: '/early-warning', icon: AlertTriangle, text: 'Early Warning' },
+      ]
+    },
+    {
+      label: 'Data', items: [
+        { to: '/satellite', icon: Satellite, text: 'Satellite Data' },
+        ...(hasRole('admin', 'agronomist', 'viewer') ?
+          [{ to: '/disease-forecasts', icon: TrendingUp, text: 'Disease Forecasts' }] : []),
+        ...(hasRole('admin', 'agronomist') ?
+          [{ to: '/ml-models', icon: Cpu, text: 'ML Models' }] : []),
+      ]
+    },
+    ...(hasRole('admin') ? [{
+      label: 'Admin', items: [
+        { to: '/users', icon: Users, text: 'User Management' },
+      ],
+    }] : []),
+  ]
 
   return (
     <>
-      {open && <div className="sidebar-overlay" onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 99,
-        display: 'none',
-      }} />}
       <aside className={`sidebar${open ? ' open' : ''}`}>
         <div className="sidebar-brand">
           <div className="sidebar-brand-icon">🌾</div>
@@ -66,7 +92,27 @@ export default function Sidebar({ open, onClose }) {
             </div>
           ))}
         </nav>
+
+        {/* User profile + logout */}
+        <div className="sidebar-user">
+          <div className="sidebar-user-info">
+            <div className="sidebar-user-avatar">
+              {(user?.full_name || user?.email || '?')[0].toUpperCase()}
+            </div>
+            <div className="sidebar-user-details">
+              <span className="sidebar-user-name">{user?.full_name || user?.email}</span>
+              <span className="sidebar-user-role" style={{ color: badge.color }}>
+                {badge.label}
+                {user?.district && user.role === 'agronomist' && <span style={{ opacity: 0.7 }}> • {user.district}</span>}
+              </span>
+            </div>
+          </div>
+          <button className="sidebar-logout" onClick={logout} title="Sign out">
+            <LogOut size={18} />
+          </button>
+        </div>
       </aside>
+
       {/* Mobile overlay */}
       {open && (
         <div

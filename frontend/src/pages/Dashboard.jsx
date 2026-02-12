@@ -4,15 +4,18 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts'
-import { MapPin, ShieldAlert, Activity, Bug, Satellite, TrendingUp } from 'lucide-react'
-import { getFarms, getFarmSatellite, getModelStatus } from '../api'
+import { MapPin, ShieldAlert, Activity, Bug, Satellite, TrendingUp, AlertTriangle } from 'lucide-react'
+import { getFarms, getFarmSatellite, getModelStatus, getEarlyWarnings } from '../api'
+import { useAuth } from '../context/AuthContext'
 
 const RISK_COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626', severe: '#7c2d12' }
 
 export default function Dashboard() {
+  const { user, hasRole } = useAuth()
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
   const [models, setModels] = useState(null)
+  const [warnings, setWarnings] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -21,10 +24,12 @@ export default function Dashboard() {
       getFarms(),
       getFarmSatellite(),
       getModelStatus(),
-    ]).then(([farmsRes, satRes, modelsRes]) => {
+      getEarlyWarnings(),
+    ]).then(([farmsRes, satRes, modelsRes, warnRes]) => {
       if (farmsRes.status === 'fulfilled') setFarms(farmsRes.value.data)
       if (satRes.status === 'fulfilled') setSatellite(satRes.value.data)
       if (modelsRes.status === 'fulfilled') setModels(modelsRes.value.data)
+      if (warnRes.status === 'fulfilled') setWarnings(warnRes.value.data)
       setLoading(false)
     }).catch(e => {
       setError(e.message)
@@ -74,7 +79,11 @@ export default function Dashboard() {
         <div className="stat-card">
           <div className="stat-icon blue"><MapPin size={22} /></div>
           <div className="stat-info">
-            <h4>Total Farms</h4>
+            <h4>
+              {hasRole('admin') ? 'Total Farms' :
+                hasRole('agronomist') ? `Farms in ${user?.district || 'District'}` :
+                  'My Farms'}
+            </h4>
             <div className="stat-value">{totalFarms}</div>
           </div>
         </div>
@@ -229,12 +238,53 @@ export default function Dashboard() {
           ) : (
             <div className="empty-state">
               <MapPin size={40} />
-              <h3>No farms registered</h3>
-              <p>Farms will appear here once added to the system</p>
+              <h3>No farms found</h3>
+              <p>
+                {hasRole('agronomist')
+                  ? `There are no registered farms in ${user?.district} yet.`
+                  : "You haven't registered any farms yet."}
+              </p>
+              {hasRole('farmer') && (
+                <Link to="/farms" className="btn btn-primary" style={{ marginTop: 12 }}>
+                  Register Your First Farm
+                </Link>
+              )}
             </div>
           )}
         </div>
-      </div>
+      </div >
+
+      {/* Early Warning Alerts */}
+      {
+        warnings && warnings.alerts && warnings.alerts.filter(a => a.alert_level !== 'low').length > 0 && (
+          <div className="card" style={{ marginTop: 20 }}>
+            <div className="card-header">
+              <h3><AlertTriangle size={18} style={{ verticalAlign: -3, marginRight: 6, color: 'var(--warning)' }} />Early Warnings</h3>
+              <Link to="/early-warning" className="btn btn-sm btn-secondary">View All</Link>
+            </div>
+            <div className="card-body">
+              {warnings.alerts.filter(a => a.alert_level !== 'low').slice(0, 5).map(a => (
+                <div key={a.farm_id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0',
+                  borderBottom: '1px solid var(--border)',
+                }}>
+                  <span className={`badge ${a.alert_level === 'critical' ? 'high' : a.alert_level}`} style={{ minWidth: 70, textAlign: 'center' }}>
+                    {a.alert_level}
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ fontSize: 13 }}>{a.farm_name}</strong>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 8 }}>{a.crop_type}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'right' }}>
+                    {a.disease_risk?.primary_threat} risk {a.combined_score}%
+                    {a.ndvi_anomaly?.detected && <div style={{ color: 'var(--danger)' }}>NDVI drop {a.ndvi_anomaly.drop_pct}%</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      }
 
       {/* Quick Actions */}
       <div className="stats-grid" style={{ marginTop: 20 }}>

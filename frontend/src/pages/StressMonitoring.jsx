@@ -136,20 +136,23 @@ export default function StressMonitoring() {
               <div className="card-header"><h3>Stress Breakdown</h3></div>
               <div className="card-body">
                 <div className="stress-bars">
-                  {Object.entries(stress.stress_breakdown).map(([type, val]) => (
-                    <div key={type} className="stress-bar-item">
-                      <label>
-                        <span style={{ textTransform: 'capitalize' }}>{type}</span>
-                        <span>{val?.toFixed(1)}%</span>
-                      </label>
-                      <div className="stress-bar-track">
-                        <div className="stress-bar-fill" style={{
-                          width: `${Math.min(val || 0, 100)}%`,
-                          background: val > 60 ? 'var(--danger)' : val > 30 ? 'var(--warning)' : 'var(--success)',
-                        }} />
+                  {Object.entries(stress.stress_breakdown).map(([type, raw]) => {
+                    const val = typeof raw === 'number' ? raw : raw?.score ?? 0
+                    return (
+                      <div key={type} className="stress-bar-item">
+                        <label>
+                          <span style={{ textTransform: 'capitalize' }}>{type}</span>
+                          <span>{val?.toFixed(1)}%</span>
+                        </label>
+                        <div className="stress-bar-track">
+                          <div className="stress-bar-fill" style={{
+                            width: `${Math.min(val || 0, 100)}%`,
+                            background: val > 60 ? 'var(--danger)' : val > 30 ? 'var(--warning)' : 'var(--success)',
+                          }} />
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             </div>
