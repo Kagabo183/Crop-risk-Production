@@ -99,7 +99,7 @@ Specialized expert models with fewer classes for higher accuracy. When a user se
 | Cassava (Imyumbati) | 5 | Bacterial Blight, Brown Streak, Green Mottle, Mosaic, Healthy | Trained (82% accuracy) |
 | Tomato | 10 | Bacterial Spot, Early/Late Blight, Leaf Mold, Septoria, Spider Mites, Target Spot, Mosaic Virus, YLCV, Healthy | Config ready |
 | Coffee | 3 | Rust, Red Spider Mite, Healthy | Config ready |
-| Irish Potato (Urusenda) | 3 | Early Blight, Late Blight, Healthy | Config ready |
+| Irish Potato (Urusenda) | 3 | Early Blight, Late Blight, Healthy | Trained (99.7% accuracy — Tanzania field dataset, 58,709 images) |
 | Chilli / Pepper | 2 | Bacterial Spot, Healthy | Config ready |
 
 **Aliases**: `imyumbati` or `manioc` → cassava, `urusenda` or `irish_potato` → potato, `chilli` or `chili` → pepper
@@ -315,7 +315,7 @@ Full CRUD for farms with integrated leaf disease scanning.
 **How to scan a leaf for disease:**
 1. Click **"Scan Leaf"** on any farm card
 2. Select a leaf image (JPG/PNG) from your device
-3. The system classifies the disease using the EfficientNet-B0 CNN (80 classes, 30 plants)
+3. The system classifies the disease using EfficientNet-B0 CNN (per-crop model if available, otherwise general 85-class model)
 4. Results appear inline on the farm card showing:
    - Disease name and confidence percentage
    - Crop type detected
@@ -356,19 +356,23 @@ Analyze environmental and physiological stress factors for any farm.
 
 ### 5. Disease Classifier (`/disease-classifier`)
 
-AI-powered leaf disease identification using a trained EfficientNet-B0 CNN.
+AI-powered leaf disease identification using EfficientNet-B0 CNN with **Grad-CAM** explainability.
 
 **How to classify a leaf image:**
-1. (Optional) Select a **crop type** from the dropdown to narrow results to a specific plant
+1. (Optional) Select a **crop type** from the dropdown:
+   - **Rwanda Priority Crops** (cassava, potato, tomato, coffee, pepper) — uses dedicated per-crop models with higher accuracy
+   - **Other Plants** — uses the general 85-class model
 2. **Drag and drop** or **click** to upload a leaf image (JPG/PNG)
 3. Click **"Classify Disease"**
 4. View results:
    - **Plant species** and **disease name** (or "Healthy")
    - **Confidence percentage** with color-coded bar (green ≥70%, orange ≥40%, red <40%)
+   - **Grad-CAM heatmap** — highlights the exact region of the leaf where the model detected disease (JET colormap: blue=low, red=high activation)
    - **Treatment recommendations** (if diseased): urgency level, spread risk, fungicides, cultural practices
    - **Top 5 predictions** with alternative diagnoses
+   - **Model type badge**: "Specialized Model" (per-crop) or "General Model" (85-class)
 
-**Supported**: 30 plant species, 80 disease classes, including Africa-relevant crops (coffee, rice, maize, potato, tomato, mango, cotton).
+**Supported**: 31 plant species, 85 disease classes, including Africa-relevant crops (cassava, coffee, rice, maize, potato, tomato, mango, cotton).
 
 ### 6. Risk Assessment (`/risk-assessment`)
 
@@ -405,7 +409,7 @@ Comprehensive ML-powered risk analysis for individual farms.
 Monitor ML model availability and test inference.
 
 **Displays:**
-- **Overview stats**: Total models, ready models, disease classes (80), plant species (30)
+- **Overview stats**: Total models, ready models, disease classes (85), plant species (31)
 - **Model cards** for each of the 6 models:
   - Disease Classifier (EfficientNet-B0 CNN)
   - Ensemble Risk Scorer (weighted ensemble)
@@ -508,7 +512,8 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8000/api/v1/farm
 | `/weather/current/{farm_id}` | GET | Current weather conditions |
 | `/weather/forecast/{farm_id}` | GET | Weather forecast |
 | `/alerts/` | GET | List alerts |
-| `/ml/classify-disease` | POST | Classify disease from leaf image (80 classes) |
+| `/ml/classify-disease` | POST | Classify disease from leaf image (per-crop or general model) |
+| `/ml/crop-models` | GET | List per-crop models with availability status |
 | `/ml/supported-diseases` | GET | List all supported plants and diseases |
 | `/ml/risk-assessment` | POST | Comprehensive ML risk assessment |
 | `/ml/predict-yield` | POST | Predict crop yield |
@@ -569,13 +574,22 @@ The platform includes 5 ML models that work together with research-validated alg
 | **Health Forecaster** | Prophet | Time-series health prediction | Satellite time-series |
 | **Ensemble Scorer** | Weighted Ensemble | Combine all models + research algorithms | All sources |
 
-### Disease Classifier — 80 Classes, 30 Plants
+### Disease Classifier — 85 Classes, 31 Plants
 
-The CNN disease classifier identifies **56 diseases across 30 plant species** using leaf images, with an overall validation accuracy of **92.9%**.
+The CNN disease classifier identifies **diseases across 31 plant species** using leaf images. The platform supports two classification modes:
 
-**Supported Plants**: Apple, Arjun, Basil, Blueberry, Cherry, Chinar, Coffee, Corn (Maize), Cotton, Grape, Guava, Jamun, Jatropha, Lemon, Mango, Orange, Peach, Pepper, Pomegranate, Potato, Raspberry, Rice, Soybean, Squash, Strawberry, Tomato, and more.
+**General Model (85-class)**: Classifies across all plants. Trained on PlantVillage + Mendeley dataset (190K images). Used when no per-crop model is available.
 
-**Africa-relevant crops include**: Coffee (Rust, Red Spider Mite, Healthy), Rice (Brown Spot, Hispa, Leaf Blast, Healthy), Mango (Anthracnose, Bacterial Canker, Die Back, Gall Midge, Powdery Mildew, Sooty Mould, and more), Cotton (Aphids, Bacterial Blight, Powdery Mildew, Target Spot), Corn/Maize (Cercospora, Common Rust, Northern Leaf Blight), Potato (Early Blight, Late Blight), and Tomato (10 diseases).
+**Per-Crop Models**: Dedicated EfficientNet-B0 models for Rwanda priority crops with higher accuracy:
+- **Cassava** — 5 classes, 82% accuracy
+- **Irish Potato** — 3 classes, 99.7% accuracy (trained on 58,709 field images from Tanzania)
+- Tomato, Coffee, Pepper — config ready, awaiting training
+
+**Grad-CAM Explainability**: All disease predictions include a visual heatmap overlay showing exactly which region of the leaf triggered the diagnosis. Uses JET colormap with Gaussian smoothing and activation-weighted alpha blending for clear, focused disease region highlighting.
+
+**Supported Plants**: Apple, Arjun, Basil, Blueberry, Cassava, Cherry, Chinar, Coffee, Corn (Maize), Cotton, Grape, Guava, Jamun, Jatropha, Lemon, Mango, Orange, Peach, Pepper, Pomegranate, Potato, Raspberry, Rice, Soybean, Squash, Strawberry, Tomato, and more.
+
+**Africa-relevant crops include**: Cassava (Bacterial Blight, Brown Streak, Green Mottle, Mosaic), Coffee (Rust, Red Spider Mite), Rice (Brown Spot, Hispa, Leaf Blast), Mango (Anthracnose, Bacterial Canker, Die Back, Gall Midge, Powdery Mildew, Sooty Mould, and more), Cotton (Aphids, Bacterial Blight, Powdery Mildew, Target Spot), Corn/Maize (Cercospora, Common Rust, Northern Leaf Blight), Potato (Early Blight, Late Blight), and Tomato (10 diseases).
 
 ### Research-Validated Algorithms
 
@@ -590,13 +604,20 @@ The Ensemble Risk Scorer combines ML predictions with proven research models:
 ### ML API Endpoints
 
 ```bash
-# Classify disease from leaf image (all 30 plants)
+# Classify disease from leaf image (general 85-class model)
 curl -X POST http://localhost:8000/api/v1/ml/classify-disease \
   -F "file=@leaf_image.jpg"
 
-# Classify with crop filter (narrows results to one plant)
-curl -X POST http://localhost:8000/api/v1/ml/classify-disease?crop_type=tomato \
+# Classify with per-crop model (uses dedicated model if available)
+curl -X POST "http://localhost:8000/api/v1/ml/classify-disease?crop_type=potato" \
   -F "file=@leaf_image.jpg"
+
+# Classify with Grad-CAM heatmap
+curl -X POST "http://localhost:8000/api/v1/ml/classify-disease?crop_type=cassava&include_gradcam=true" \
+  -F "file=@leaf_image.jpg"
+
+# List per-crop models and availability
+curl http://localhost:8000/api/v1/ml/crop-models
 
 # List all supported plants and diseases
 curl http://localhost:8000/api/v1/ml/supported-diseases
@@ -667,7 +688,42 @@ python -m app.scripts.download_plantvillage train --data-dir "path/to/dataset" -
 python -m app.scripts.download_plantvillage list --data-dir "path/to/dataset"
 ```
 
-### Dataset Info
+### Per-Crop Disease Models (Rwanda Priority Crops)
+
+Train dedicated models for specific crops with higher accuracy than the general classifier.
+
+```bash
+cd backend
+
+# Train a single crop model
+python -m app.scripts.train_crop_model --crop potato \
+  --data-dir /path/to/potato_dataset --val-dir /path/to/potato_val \
+  --epochs 20 --batch-size 16
+
+# Train all configured crops
+python -m app.scripts.train_crop_model --all \
+  --data-dir /path/to/datasets --epochs 15
+
+# List available crop configs
+python -m app.scripts.train_crop_model --list
+```
+
+**Currently trained per-crop models:**
+
+| Crop | Dataset | Images | Accuracy | Epochs |
+|------|---------|--------|----------|--------|
+| Cassava | Custom (5 diseases) | — | 82% | 5 |
+| Irish Potato | Tanzania Field Dataset (Mbeya region) | 58,709 | 99.7% | 20 (fine-tuned from epoch 13) |
+
+**Dataset structure** (ImageFolder format):
+```
+potato_dataset/
+├── earlyblt/      # Early Blight images
+├── healthy/       # Healthy leaf images
+└── lateblt/       # Late Blight images
+```
+
+### General Classifier Dataset Info
 
 | Split | Images | Classes | Source |
 |-------|--------|---------|--------|
@@ -680,12 +736,16 @@ python -m app.scripts.download_plantvillage list --data-dir "path/to/dataset"
 
 ### Model Storage
 
-Trained models are saved to `backend/data/models/` (set via `MODEL_DIR` env var):
+Trained models are saved to `data/models/` (mapped to `/app/data/models` in Docker via `MODEL_DIR` env var):
 
 ```
-backend/data/models/
-├── disease_classifier_80class.pth    # EfficientNet-B0 weights (16 MB)
-├── disease_classifier_80class.json   # Class mapping (80 classes)
+data/models/
+├── disease_classifier_80class.pth    # General EfficientNet-B0 weights (16 MB)
+├── disease_classifier_80class.json   # General class mapping (85 classes)
+├── disease_cassava.pth               # Per-crop: Cassava (5 classes, 82% acc)
+├── disease_cassava.json              # Cassava class mapping
+├── disease_potato.pth                # Per-crop: Potato (3 classes, 99.7% acc)
+├── disease_potato.json               # Potato class mapping + training metadata
 ├── ndvi_anomaly_detector.pkl         # Isolation Forest
 ├── yield_predictor_potato.pkl        # XGBoost
 └── health_forecaster.pkl             # Prophet
@@ -838,7 +898,9 @@ crop-risk-backend/
 │   │   ├── ml/                             # Machine Learning Module
 │   │   │   ├── __init__.py                 # ML exports
 │   │   │   ├── base.py                     # Base ML model class
-│   │   │   ├── disease_classifier.py       # CNN disease classifier
+│   │   │   ├── disease_classifier.py       # General 85-class CNN + Grad-CAM
+│   │   │   ├── crop_disease_classifier.py  # Per-crop CNN classifier + Grad-CAM
+│   │   │   ├── crop_disease_config.py      # Per-crop configs (5 crops)
 │   │   │   ├── anomaly_detector.py         # NDVI anomaly detection
 │   │   │   ├── yield_predictor.py          # XGBoost yield prediction
 │   │   │   ├── trend_forecaster.py         # Prophet health forecasting
@@ -853,7 +915,8 @@ crop-risk-backend/
 │   │   │   └── alert.py                    # Alert model
 │   │   ├── scripts/
 │   │   │   ├── download_plantvillage.py    # Dataset download/train
-│   │   │   └── download_pretrained.py      # Pre-trained models
+│   │   │   ├── download_pretrained.py      # Pre-trained models
+│   │   │   └── train_crop_model.py         # Per-crop model training CLI
 │   │   ├── services/
 │   │   │   ├── satellite_service.py        # GEE integration
 │   │   │   ├── pipeline_service.py         # Copernicus Sentinel-2 pipeline
@@ -890,6 +953,9 @@ crop-risk-backend/
 │   └── package.json
 ├── data/
 │   └── models/                            # Trained ML models (.pth, .json, .pkl)
+│       ├── disease_cassava.pth            # Cassava per-crop model
+│       ├── disease_potato.pth             # Potato per-crop model
+│       └── ...                            # General + other models
 ├── logs/                                   # Application logs
 ├── docker-compose.yml
 ├── .env.example
@@ -997,6 +1063,6 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Version**: 2.4.0
+**Version**: 2.5.0
 **Last Updated**: February 2026
 **Maintainer**: Crop Risk Platform Team

@@ -392,6 +392,32 @@ TREATMENT_RECOMMENDATIONS = {
 }
 
 
+def apply_jet_colormap(normalized_cam: np.ndarray) -> np.ndarray:
+    """
+    Apply JET colormap to a normalized [0,1] 2D array.
+
+    Produces blue (low) -> cyan -> green -> yellow -> red (high).
+    Standard scientific visualization for Grad-CAM heatmaps.
+
+    Args:
+        normalized_cam: 2D numpy array with values in [0, 1]
+
+    Returns:
+        RGB uint8 array of shape (*normalized_cam.shape, 3)
+    """
+    r = np.clip(1.5 - np.abs(4.0 * normalized_cam - 3.0), 0, 1)
+    g = np.clip(1.5 - np.abs(4.0 * normalized_cam - 2.0), 0, 1)
+    b = np.clip(1.5 - np.abs(4.0 * normalized_cam - 1.0), 0, 1)
+
+    heatmap = np.stack([
+        (r * 255).astype(np.uint8),
+        (g * 255).astype(np.uint8),
+        (b * 255).astype(np.uint8),
+    ], axis=-1)
+
+    return heatmap
+
+
 class DiseaseClassifier:
     """
     CNN-based plant disease classifier using transfer learning.
@@ -682,10 +708,9 @@ class DiseaseClassifier:
 
         try:
             import torch
-            from PIL import Image
+            from PIL import Image, ImageFilter
             import io, base64
 
-            # Re-open original image
             orig = Image.open(image_path).convert('RGB')
             inp = self.transforms(orig).unsqueeze(0).to(self.device)
 
@@ -703,12 +728,10 @@ class DiseaseClassifier:
             fh = target_layer.register_forward_hook(fwd_hook)
             bh = target_layer.register_full_backward_hook(bwd_hook)
 
-            # Forward pass
             self.model.eval()
             output = self.model(inp)
             pred_idx = output.argmax(dim=1).item()
 
-            # Backward pass on predicted class
             self.model.zero_grad()
             output[0, pred_idx].backward()
 
@@ -727,21 +750,35 @@ class DiseaseClassifier:
                 cam = cam / cam.max()
             cam_np = cam.cpu().numpy()
 
-            # Resize to original image size and create overlay
-            import numpy as np
-            cam_resized = np.array(Image.fromarray((cam_np * 255).astype(np.uint8)).resize(orig.size, Image.BILINEAR)) / 255.0
+            # Upscale with LANCZOS for smoother result (7x7 -> original size)
+            cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8))
+            cam_resized = cam_pil.resize(orig.size, Image.LANCZOS)
 
-            # Create heatmap (blue -> green -> yellow -> red)
-            heatmap = np.zeros((*cam_resized.shape, 3), dtype=np.uint8)
-            heatmap[..., 0] = (cam_resized * 255).astype(np.uint8)  # Red channel
-            heatmap[..., 1] = ((1 - np.abs(cam_resized - 0.5) * 2) * 255).astype(np.uint8)  # Green peaks at 0.5
-            heatmap[..., 2] = ((1 - cam_resized) * 255).astype(np.uint8)  # Blue channel (inverse)
+            # Gaussian blur to smooth the blocky 7x7 activation map
+            blur_radius = max(min(orig.size) // 25, 5)
+            cam_resized = cam_resized.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
-            # Overlay: 60% original + 40% heatmap
-            orig_np = np.array(orig)
-            overlay = (orig_np * 0.6 + heatmap * 0.4).astype(np.uint8)
+            cam_arr = np.array(cam_resized).astype(np.float32) / 255.0
 
-            # Encode to base64 PNG
+            # Re-normalize after blur
+            if cam_arr.max() > 0:
+                cam_arr = (cam_arr - cam_arr.min()) / (cam_arr.max() - cam_arr.min())
+
+            # Threshold: suppress low activations (noise) below 15% of max
+            cam_arr[cam_arr < 0.15] = 0.0
+            if cam_arr.max() > 0:
+                cam_arr = cam_arr / cam_arr.max()
+
+            # Apply standard JET colormap (blue=low -> red=high)
+            heatmap = apply_jet_colormap(cam_arr)
+
+            # Activation-weighted alpha: stronger overlay where disease is detected,
+            # original image preserved where activation is zero
+            alpha = cam_arr[..., np.newaxis] * 0.6  # max 60% heatmap at peak
+            orig_np = np.array(orig).astype(np.float32)
+            overlay = orig_np * (1.0 - alpha) + heatmap.astype(np.float32) * alpha
+            overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
             overlay_img = Image.fromarray(overlay)
             buf = io.BytesIO()
             overlay_img.save(buf, format='PNG')

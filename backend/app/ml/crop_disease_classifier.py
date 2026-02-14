@@ -16,7 +16,7 @@ import json
 import numpy as np
 
 from app.ml.crop_disease_config import CropDiseaseConfig
-from app.ml.disease_classifier import CLASS_INFO, TREATMENT_RECOMMENDATIONS
+from app.ml.disease_classifier import CLASS_INFO, TREATMENT_RECOMMENDATIONS, apply_jet_colormap
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,7 @@ class CropDiseaseClassifier:
 
         try:
             import torch
-            from PIL import Image
+            from PIL import Image, ImageFilter
             import io
             import base64
 
@@ -265,17 +265,34 @@ class CropDiseaseClassifier:
                 cam = cam / cam.max()
             cam_np = cam.cpu().numpy()
 
-            cam_resized = np.array(
-                Image.fromarray((cam_np * 255).astype(np.uint8)).resize(orig.size, Image.BILINEAR)
-            ) / 255.0
+            # Upscale with LANCZOS for smoother result (7x7 -> original size)
+            cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8))
+            cam_resized = cam_pil.resize(orig.size, Image.LANCZOS)
 
-            heatmap = np.zeros((*cam_resized.shape, 3), dtype=np.uint8)
-            heatmap[..., 0] = (cam_resized * 255).astype(np.uint8)
-            heatmap[..., 1] = ((1 - np.abs(cam_resized - 0.5) * 2) * 255).astype(np.uint8)
-            heatmap[..., 2] = ((1 - cam_resized) * 255).astype(np.uint8)
+            # Gaussian blur to smooth the blocky 7x7 activation map
+            blur_radius = max(min(orig.size) // 25, 5)
+            cam_resized = cam_resized.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
-            orig_np = np.array(orig)
-            overlay = (orig_np * 0.6 + heatmap * 0.4).astype(np.uint8)
+            cam_arr = np.array(cam_resized).astype(np.float32) / 255.0
+
+            # Re-normalize after blur
+            if cam_arr.max() > 0:
+                cam_arr = (cam_arr - cam_arr.min()) / (cam_arr.max() - cam_arr.min())
+
+            # Threshold: suppress low activations (noise) below 15% of max
+            cam_arr[cam_arr < 0.15] = 0.0
+            if cam_arr.max() > 0:
+                cam_arr = cam_arr / cam_arr.max()
+
+            # Apply standard JET colormap (blue=low -> red=high)
+            heatmap = apply_jet_colormap(cam_arr)
+
+            # Activation-weighted alpha: stronger overlay where disease is detected,
+            # original image preserved where activation is zero
+            alpha = cam_arr[..., np.newaxis] * 0.6
+            orig_np = np.array(orig).astype(np.float32)
+            overlay = orig_np * (1.0 - alpha) + heatmap.astype(np.float32) * alpha
+            overlay = np.clip(overlay, 0, 255).astype(np.uint8)
 
             overlay_img = Image.fromarray(overlay)
             buf = io.BytesIO()
