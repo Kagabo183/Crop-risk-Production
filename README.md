@@ -83,11 +83,26 @@ The Crop Risk Prediction Platform provides:
 ### Machine Learning
 | Model | Purpose | Algorithm |
 |-------|---------|-----------|
-| Disease Classifier | Identify plant diseases from leaf images | CNN (EfficientNet-B0) — 80 classes, 30 plants, 92.9% accuracy |
+| Disease Classifier | Identify plant diseases from leaf images | CNN (EfficientNet-B0) — 85 classes, 31 plants |
+| Per-Crop Classifiers | Crop-specific disease detection (Rwanda priority crops) | CNN (EfficientNet-B0) — separate expert models |
 | Anomaly Detector | Detect unusual vegetation patterns | Isolation Forest |
 | Yield Predictor | Forecast crop yields | XGBoost |
 | Health Forecaster | Predict vegetation trends | Prophet |
 | Ensemble Scorer | Combined risk assessment | Weighted ensemble + research algorithms |
+
+### Per-Crop Disease Models (Rwanda Priority Crops)
+
+Specialized expert models with fewer classes for higher accuracy. When a user selects a crop, only that crop's model is loaded — no cross-crop confusion.
+
+| Crop | Classes | Diseases | Status |
+|------|---------|----------|--------|
+| Cassava (Imyumbati) | 5 | Bacterial Blight, Brown Streak, Green Mottle, Mosaic, Healthy | Trained (82% accuracy) |
+| Tomato | 10 | Bacterial Spot, Early/Late Blight, Leaf Mold, Septoria, Spider Mites, Target Spot, Mosaic Virus, YLCV, Healthy | Config ready |
+| Coffee | 3 | Rust, Red Spider Mite, Healthy | Config ready |
+| Irish Potato (Urusenda) | 3 | Early Blight, Late Blight, Healthy | Config ready |
+| Chilli / Pepper | 2 | Bacterial Spot, Healthy | Config ready |
+
+**Aliases**: `imyumbati` or `manioc` → cassava, `urusenda` or `irish_potato` → potato, `chilli` or `chili` → pepper
 
 ---
 

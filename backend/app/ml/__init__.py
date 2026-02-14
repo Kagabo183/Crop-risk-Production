@@ -34,6 +34,11 @@ Usage:
 """
 
 from app.ml.disease_classifier import DiseaseClassifier
+from app.ml.crop_disease_classifier import CropDiseaseClassifier
+from app.ml.crop_disease_config import (
+    CropDiseaseConfig, CROP_DISEASE_CONFIGS,
+    get_crop_config, list_available_crops,
+)
 from app.ml.anomaly_detector import NDVIAnomalyDetector
 from app.ml.yield_predictor import YieldPredictor
 from app.ml.trend_forecaster import HealthTrendForecaster
@@ -44,10 +49,17 @@ from app.ml.intelligence import RiskIntelligence, SpatialAnalyzer
 __all__ = [
     # ML Models
     'DiseaseClassifier',
+    'CropDiseaseClassifier',
     'NDVIAnomalyDetector',
     'YieldPredictor',
     'HealthTrendForecaster',
     'EnsembleRiskScorer',
+
+    # Per-crop config
+    'CropDiseaseConfig',
+    'CROP_DISEASE_CONFIGS',
+    'get_crop_config',
+    'list_available_crops',
 
     # Registry
     'ModelRegistry',

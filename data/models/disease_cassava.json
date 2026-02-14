@@ -1,0 +1,20 @@
+{
+  "classes": {
+    "0": "Cassava___bacterial_blight",
+    "1": "Cassava___brown_streak_disease",
+    "2": "Cassava___green_mottle",
+    "3": "Cassava___healthy",
+    "4": "Cassava___mosaic_disease"
+  },
+  "class_to_idx": {
+    "Cassava___bacterial_blight": 0,
+    "Cassava___brown_streak_disease": 1,
+    "Cassava___green_mottle": 2,
+    "Cassava___healthy": 3,
+    "Cassava___mosaic_disease": 4
+  },
+  "num_classes": 5,
+  "crop_key": "cassava",
+  "display_name": "Cassava (Imyumbati)",
+  "version": "cassava_v1.0"
+}

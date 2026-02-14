@@ -26,7 +26,38 @@ class ModelRegistry:
         'disease_classifier': {
             'class': 'DiseaseClassifier',
             'module': 'app.ml.disease_classifier',
-            'description': 'CNN-based plant disease classification'
+            'description': 'CNN-based plant disease classification (80 classes, 30 plants)'
+        },
+        # Per-crop disease classifiers (Rwanda priority crops)
+        'disease_classifier_tomato': {
+            'class': 'CropDiseaseClassifier',
+            'module': 'app.ml.crop_disease_classifier',
+            'description': 'Tomato disease classifier (10 classes)',
+            'crop_key': 'tomato',
+        },
+        'disease_classifier_coffee': {
+            'class': 'CropDiseaseClassifier',
+            'module': 'app.ml.crop_disease_classifier',
+            'description': 'Coffee disease classifier (3 classes)',
+            'crop_key': 'coffee',
+        },
+        'disease_classifier_pepper': {
+            'class': 'CropDiseaseClassifier',
+            'module': 'app.ml.crop_disease_classifier',
+            'description': 'Chilli/Pepper disease classifier (2 classes)',
+            'crop_key': 'pepper',
+        },
+        'disease_classifier_potato': {
+            'class': 'CropDiseaseClassifier',
+            'module': 'app.ml.crop_disease_classifier',
+            'description': 'Potato disease classifier (3 classes)',
+            'crop_key': 'potato',
+        },
+        'disease_classifier_cassava': {
+            'class': 'CropDiseaseClassifier',
+            'module': 'app.ml.crop_disease_classifier',
+            'description': 'Cassava disease classifier (5 classes)',
+            'crop_key': 'cassava',
         },
         'anomaly_detector': {
             'class': 'NDVIAnomalyDetector',
@@ -130,10 +161,19 @@ class ModelRegistry:
             config = self.MODEL_TYPES[model_type]
             module = __import__(config['module'], fromlist=[config['class']])
             model_class = getattr(module, config['class'])
-            instance = model_class()
+
+            # Per-crop classifiers need a CropDiseaseConfig
+            if 'crop_key' in config:
+                from app.ml.crop_disease_config import get_crop_config
+                crop_config = get_crop_config(config['crop_key'])
+                instance = model_class(config=crop_config)
+            else:
+                instance = model_class()
 
             # Try to load saved weights
-            if hasattr(instance, 'load'):
+            if hasattr(instance, 'load_model'):
+                instance.load_model()
+            elif hasattr(instance, 'load'):
                 instance.load()
 
             # Register

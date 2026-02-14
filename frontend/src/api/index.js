@@ -109,6 +109,8 @@ export const classifyDisease = (file, cropType) => {
 
 export const getSupportedDiseases = () => api.get('/ml/supported-diseases')
 
+export const getCropModels = () => api.get('/ml/crop-models')
+
 export const getRiskAssessment = (farmId) =>
   api.get(`/ml/risk-assessment/${farmId}`)
 

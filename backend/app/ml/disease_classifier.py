@@ -41,6 +41,12 @@ CLASS_INFO = {
     "Basil___healthy": ("Basil", "Healthy", True),
     # Blueberry (1)
     "Blueberry___healthy": ("Blueberry", "Healthy", True),
+    # Cassava (5)
+    "Cassava___bacterial_blight": ("Cassava", "Bacterial Blight", False),
+    "Cassava___brown_streak_disease": ("Cassava", "Brown Streak Disease", False),
+    "Cassava___green_mottle": ("Cassava", "Green Mottle", False),
+    "Cassava___healthy": ("Cassava", "Healthy", True),
+    "Cassava___mosaic_disease": ("Cassava", "Mosaic Disease", False),
     # Cherry (2)
     "Cherry_(including_sour)___Powdery_mildew": ("Cherry", "Powdery Mildew", False),
     "Cherry_(including_sour)___healthy": ("Cherry", "Healthy", True),
@@ -275,6 +281,24 @@ TREATMENT_RECOMMENDATIONS = {
         "urgency": "high",
         "spread_risk": "high"
     },
+    "Mosaic Disease": {
+        "fungicides": ["No chemical cure — use clean planting material"],
+        "cultural": ["Remove and burn infected plants", "Use CMD-resistant varieties", "Control whitefly vectors", "Use virus-free stem cuttings"],
+        "urgency": "high",
+        "spread_risk": "very_high"
+    },
+    "Brown Streak Disease": {
+        "fungicides": ["No chemical cure available"],
+        "cultural": ["Use CBSD-tolerant varieties", "Remove and burn infected plants", "Use virus-free planting material", "Control whitefly vectors"],
+        "urgency": "critical",
+        "spread_risk": "very_high"
+    },
+    "Green Mottle": {
+        "fungicides": ["No chemical cure — viral disease"],
+        "cultural": ["Use virus-free cuttings", "Remove infected plants", "Control aphid vectors", "Use resistant varieties"],
+        "urgency": "medium",
+        "spread_risk": "medium"
+    },
     "Citrus Greening (HLB)": {
         "fungicides": ["Control psyllid vectors with insecticides"],
         "cultural": ["Remove infected trees", "Control Asian citrus psyllid", "Use certified nursery stock"],
@@ -408,14 +432,16 @@ class DiseaseClassifier:
             self.device = 'cpu'
 
     def _setup_transforms(self):
-        """Setup image preprocessing transforms"""
+        """Setup image preprocessing transforms — must match training transforms"""
         try:
             from torchvision import transforms
-            # Match the training transforms - NO normalization
-            # User's training code did not use ImageNet normalization
+            # MUST include ImageNet normalization to match training pipeline
+            # Training uses Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            # so inference must too, otherwise predictions are garbage
             self.transforms = transforms.Compose([
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
         except ImportError:
             logger.warning("torchvision not installed")
@@ -753,6 +779,125 @@ class DiseaseClassifier:
             'error': 'Model not available - train first with: python -m app.scripts.train_disease_model'
         }
 
+    def evaluate(self, data_dir: str, batch_size: int = 32) -> Dict[str, Any]:
+        """
+        Evaluate model on a dataset and return full metrics.
+
+        Args:
+            data_dir: Path to dataset directory (ImageFolder format)
+            batch_size: Batch size for evaluation
+
+        Returns:
+            Dict with accuracy, precision, recall, f1 (per-class and overall),
+            confusion matrix, and classification report.
+        """
+        if not self.model_loaded:
+            if not self.load_model():
+                return {'error': 'Model not loaded'}
+
+        try:
+            import torch
+            from torch.utils.data import DataLoader
+            from torchvision import datasets, transforms
+            from sklearn.metrics import (
+                accuracy_score, precision_score, recall_score, f1_score,
+                confusion_matrix, classification_report
+            )
+
+            eval_transforms = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+
+            dataset = datasets.ImageFolder(data_dir, transform=eval_transforms)
+            num_workers = 0 if os.name == 'nt' else 4
+            loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
+                                num_workers=num_workers, pin_memory=True)
+
+            class_names = [self.classes.get(i, f"class_{i}") for i in range(self.num_classes)]
+            display_names = []
+            for name in class_names:
+                info = CLASS_INFO.get(name, (name, name, False))
+                display_names.append(f"{info[0]} - {info[1]}")
+
+            all_preds = []
+            all_labels = []
+            all_probs = []
+
+            self.model.eval()
+            with torch.no_grad():
+                for images, labels in loader:
+                    images = images.to(self.device)
+                    outputs = self.model(images)
+                    probs = torch.nn.functional.softmax(outputs, dim=1)
+                    _, predicted = torch.max(outputs, 1)
+
+                    all_preds.extend(predicted.cpu().numpy())
+                    all_labels.extend(labels.numpy())
+                    all_probs.extend(probs.cpu().numpy())
+
+            all_preds = np.array(all_preds)
+            all_labels = np.array(all_labels)
+            all_probs = np.array(all_probs)
+
+            # Overall metrics
+            accuracy = accuracy_score(all_labels, all_preds)
+            precision_weighted = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
+            recall_weighted = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
+            f1_weighted = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+            precision_macro = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+            recall_macro = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+            f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+
+            # Per-class metrics
+            precision_per_class = precision_score(all_labels, all_preds, average=None, zero_division=0)
+            recall_per_class = recall_score(all_labels, all_preds, average=None, zero_division=0)
+            f1_per_class = f1_score(all_labels, all_preds, average=None, zero_division=0)
+
+            # Confusion matrix
+            cm = confusion_matrix(all_labels, all_preds)
+
+            # Classification report
+            report = classification_report(
+                all_labels, all_preds,
+                target_names=display_names,
+                zero_division=0
+            )
+
+            # Per-class detail
+            per_class = {}
+            for i, name in enumerate(display_names):
+                per_class[name] = {
+                    'precision': round(float(precision_per_class[i]), 4),
+                    'recall': round(float(recall_per_class[i]), 4),
+                    'f1_score': round(float(f1_per_class[i]), 4),
+                    'support': int(np.sum(all_labels == i)),
+                }
+
+            logger.info(f"Evaluation Results ({self.num_classes} classes):")
+            logger.info(f"\n{report}")
+
+            return {
+                'total_samples': len(all_labels),
+                'num_classes': self.num_classes,
+                'accuracy': round(accuracy, 4),
+                'precision_weighted': round(precision_weighted, 4),
+                'recall_weighted': round(recall_weighted, 4),
+                'f1_weighted': round(f1_weighted, 4),
+                'precision_macro': round(precision_macro, 4),
+                'recall_macro': round(recall_macro, 4),
+                'f1_macro': round(f1_macro, 4),
+                'per_class': per_class,
+                'confusion_matrix': cm.tolist(),
+                'class_names': display_names,
+                'classification_report': report,
+            }
+
+        except Exception as e:
+            logger.error(f"Evaluation failed: {e}")
+            return {'error': str(e)}
+
     def train(self, train_data_dir: str, val_data_dir: str,
               epochs: int = 10, batch_size: int = 32,
               learning_rate: float = 0.001) -> Dict[str, Any]:
@@ -778,13 +923,19 @@ class DiseaseClassifier:
 
             self._setup_device()
 
-            # Data augmentation for training
+            # Aggressive augmentation to simulate field conditions:
+            # - GaussianBlur: simulates camera blur / shaky hands
+            # - Strong ColorJitter: simulates outdoor lighting variation
+            # - RandomPerspective: simulates different shooting angles
+            # - RandomRotation(30): leaves photographed at various angles
             train_transforms = transforms.Compose([
-                transforms.RandomResizedCrop(224),
+                transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomVerticalFlip(),
-                transforms.RandomRotation(20),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.RandomRotation(30),
+                transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.3, hue=0.1),
+                transforms.RandomPerspective(distortion_scale=0.2, p=0.3),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
             ])
@@ -904,15 +1055,24 @@ class DiseaseClassifier:
 
             self.model_loaded = True
 
-            return {
+            # Run full evaluation on validation set
+            logger.info("Running evaluation on validation set...")
+            eval_metrics = self.evaluate(val_data_dir, batch_size=batch_size)
+
+            result = {
                 'final_train_acc': train_acc,
                 'final_val_acc': val_acc,
                 'best_val_acc': best_val_acc,
                 'epochs_trained': epochs,
                 'num_classes': self.num_classes,
                 'classes': self.classes,
-                'history': history
+                'history': history,
             }
+
+            if 'error' not in eval_metrics:
+                result['evaluation'] = eval_metrics
+
+            return result
 
         except Exception as e:
             logger.error(f"Training failed: {e}")

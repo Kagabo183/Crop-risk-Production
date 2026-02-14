@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Upload, Camera, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react'
-import { classifyDisease, getSupportedDiseases } from '../api'
+import { classifyDisease, getSupportedDiseases, getCropModels } from '../api'
 
 export default function DiseaseClassifier() {
   const [file, setFile] = useState(null)
@@ -10,13 +10,17 @@ export default function DiseaseClassifier() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [supported, setSupported] = useState(null)
+  const [cropModels, setCropModels] = useState([])
   const [dragover, setDragover] = useState(false)
   const inputRef = useRef()
 
-  // Load supported diseases on first render
-  useState(() => {
+  // Load supported diseases and crop models on first render
+  useEffect(() => {
     getSupportedDiseases()
       .then(r => setSupported(r.data))
+      .catch(() => {})
+    getCropModels()
+      .then(r => setCropModels(r.data.crop_models || []))
       .catch(() => {})
   }, [])
 
@@ -73,12 +77,25 @@ export default function DiseaseClassifier() {
           <div className="card-body">
             {/* Crop filter */}
             <div className="form-group">
-              <label>Crop Type (optional — narrows results)</label>
+              <label>Crop Type (select for best accuracy)</label>
               <select className="form-control" value={cropType} onChange={e => setCropType(e.target.value)}>
-                <option value="">All plants</option>
-                {plants.map(p => (
-                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
-                ))}
+                <option value="">All plants (general model)</option>
+                {cropModels.length > 0 && (
+                  <optgroup label="Rwanda Priority Crops (specialized models)">
+                    {cropModels.filter(m => m.rwanda_priority).map(m => (
+                      <option key={m.crop_key} value={m.crop_key}>
+                        {m.display_name} ({m.num_classes} classes){m.model_available ? '' : ' — general model'}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Other Plants (general model)">
+                  {plants
+                    .filter(p => !cropModels.some(m => m.crop_key === p))
+                    .map(p => (
+                      <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                    ))}
+                </optgroup>
               </select>
             </div>
 
@@ -172,7 +189,18 @@ export default function DiseaseClassifier() {
                       </div>
                       <div style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 2 }}>
                         Plant: <strong>{result.plant}</strong>
-                        {result.crop_type && <> | Filtered: <strong>{result.crop_type}</strong></>}
+                        {result.crop_type && <> | Crop: <strong>{result.crop_type}</strong></>}
+                        {result.model_type && (
+                          <> | <span style={{
+                            fontSize: 11,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background: result.model_type === 'per_crop' ? 'var(--success)' : 'var(--text-secondary)',
+                            color: '#fff',
+                          }}>
+                            {result.model_type === 'per_crop' ? 'Specialized Model' : 'General Model'}
+                          </span></>
+                        )}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>

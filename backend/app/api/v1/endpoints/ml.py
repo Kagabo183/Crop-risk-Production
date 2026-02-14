@@ -44,6 +44,7 @@ class DiseaseClassifyResponse(BaseModel):
     treatment: dict
     crop_type: str
     gradcam_base64: Optional[str] = None
+    model_type: Optional[str] = None  # "per_crop" or "general_80class"
 
 
 class RiskAssessmentRequest(BaseModel):
@@ -177,30 +178,50 @@ def get_farm_data(farm_id: int, db: Session) -> dict:
 @router.post("/classify-disease", response_model=DiseaseClassifyResponse)
 async def classify_disease(
     file: UploadFile = File(...),
-    crop_type: Optional[str] = Query(default=None, description="Optional crop filter"),
+    crop_type: Optional[str] = Query(
+        default=None,
+        description="Crop type. If a per-crop model exists (tomato, coffee, pepper, potato), "
+                    "uses the specialized model. Otherwise falls back to the general 80-class model."
+    ),
     current_user: UserModel = Depends(require_any_authenticated),
 ):
     """
     Classify plant disease from uploaded leaf image.
 
-    Supports 30 plant species and 56 diseases (80 classes total).
-    Optionally filter by crop_type (e.g. potato, tomato, rice, coffee, mango).
+    When crop_type matches a Rwanda priority crop (tomato, coffee, pepper, potato)
+    and its per-crop model is trained, uses the specialized model for higher accuracy.
+    Otherwise falls back to the general 80-class model.
     """
+    # Save uploaded file
+    file_path = UPLOAD_DIR / f"disease_{datetime.utcnow().timestamp()}_{file.filename}"
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
     try:
-        from app.ml import DiseaseClassifier
+        result = None
+        model_type_used = "general_80class"
 
-        # Save uploaded file
-        file_path = UPLOAD_DIR / f"disease_{datetime.utcnow().timestamp()}_{file.filename}"
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Try per-crop model first
+        if crop_type:
+            from app.ml.crop_disease_config import get_crop_config
+            crop_config = get_crop_config(crop_type)
 
-        # Classify with Grad-CAM explainability
-        classifier = DiseaseClassifier(crop_type=crop_type)
-        result = classifier.predict_with_gradcam(str(file_path))
+            if crop_config:
+                from app.ml.crop_disease_classifier import CropDiseaseClassifier
+                classifier = CropDiseaseClassifier(config=crop_config)
+                if classifier.load_model():
+                    result = classifier.predict_with_gradcam(str(file_path))
+                    model_type_used = "per_crop"
+                    logger.info(f"Used per-crop model for {crop_type}")
+                else:
+                    logger.info(f"Per-crop model for {crop_type} not available, falling back to general")
 
-        # Clean up
-        file_path.unlink(missing_ok=True)
+        # Fallback to general 80-class model
+        if result is None:
+            from app.ml import DiseaseClassifier
+            classifier = DiseaseClassifier(crop_type=crop_type)
+            result = classifier.predict_with_gradcam(str(file_path))
 
         return DiseaseClassifyResponse(
             plant=result.get('plant', 'Unknown'),
@@ -211,11 +232,14 @@ async def classify_disease(
             treatment=result.get('treatment', {}),
             crop_type=result.get('crop_type', crop_type or 'unknown'),
             gradcam_base64=result.get('gradcam_base64'),
+            model_type=model_type_used,
         )
 
     except Exception as e:
         logger.error(f"Disease classification failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        file_path.unlink(missing_ok=True)
 
 
 @router.get("/supported-diseases")
@@ -235,6 +259,100 @@ async def get_supported_diseases():
         },
         "treatments_available": sorted(TREATMENT_RECOMMENDATIONS.keys())
     }
+
+
+@router.get("/crop-models")
+async def list_crop_models():
+    """
+    List available per-crop disease classification models.
+
+    Returns Rwanda priority crops with their class counts and model availability.
+    """
+    from app.ml.crop_disease_config import CROP_DISEASE_CONFIGS
+    from app.ml.disease_classifier import CLASS_INFO
+
+    models = []
+    for key, config in CROP_DISEASE_CONFIGS.items():
+        model_path = Path(os.environ.get('MODEL_DIR', '/app/data/models')) / config.model_filename
+
+        # Build disease list from CLASS_INFO
+        diseases = []
+        for class_name in sorted(config.class_names):
+            info = CLASS_INFO.get(class_name, ("Unknown", "Unknown", False))
+            diseases.append({
+                "class_name": class_name,
+                "plant": info[0],
+                "disease": info[1],
+                "is_healthy": info[2],
+            })
+
+        models.append({
+            "crop_key": config.crop_key,
+            "display_name": config.display_name,
+            "num_classes": config.num_classes,
+            "diseases": diseases,
+            "rwanda_priority": config.rwanda_priority,
+            "model_available": model_path.exists(),
+            "description": config.description,
+        })
+
+    return {
+        "crop_models": models,
+        "total": len(models),
+    }
+
+
+@router.post("/evaluate-model")
+async def evaluate_model(
+    data_dir: str = Query(..., description="Path to evaluation dataset (ImageFolder format)"),
+    crop_type: Optional[str] = Query(default=None, description="Crop type for per-crop model, or None for general model"),
+    batch_size: int = Query(default=32, ge=1, le=128),
+    current_user: UserModel = Depends(require_any_authenticated),
+):
+    """
+    Evaluate a disease classification model on a dataset.
+
+    Returns precision, recall, F1 (per-class and overall), confusion matrix,
+    and a full classification report.
+    """
+    try:
+        if crop_type:
+            from app.ml.crop_disease_config import get_crop_config
+            crop_config = get_crop_config(crop_type)
+
+            if crop_config:
+                from app.ml.crop_disease_classifier import CropDiseaseClassifier
+                classifier = CropDiseaseClassifier(config=crop_config)
+                if not classifier.load_model():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Per-crop model for {crop_type} not found. Train it first."
+                    )
+                result = classifier.evaluate(data_dir, batch_size=batch_size)
+            else:
+                # Unknown crop — use general model
+                from app.ml import DiseaseClassifier
+                classifier = DiseaseClassifier(crop_type=crop_type)
+                if not classifier.load_model():
+                    raise HTTPException(status_code=404, detail="General model not found")
+                result = classifier.evaluate(data_dir, batch_size=batch_size)
+        else:
+            from app.ml import DiseaseClassifier
+            classifier = DiseaseClassifier()
+            if not classifier.load_model():
+                raise HTTPException(status_code=404, detail="General model not found")
+            result = classifier.evaluate(data_dir, batch_size=batch_size)
+
+        if 'error' in result:
+            raise HTTPException(status_code=500, detail=result['error'])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Model evaluation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============ Risk Assessment Endpoints ============
