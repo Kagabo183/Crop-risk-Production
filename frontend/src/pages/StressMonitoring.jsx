@@ -108,6 +108,50 @@ export default function StressMonitoring() {
       </div>
 
       {error && <div className="error-box" style={{ marginBottom: 20 }}><AlertTriangle size={18} />{error}</div>}
+
+      {/* Buffer warning for farms without boundaries */}
+      {selectedFarm && farms.length > 0 && !loading && (() => {
+        const currentFarm = farms.find(f => f.id === selectedFarm)
+        const hasBoundary = currentFarm?.boundary != null
+        const farmArea = currentFarm?.area
+
+        if (!hasBoundary && farmArea) {
+          const bufferAreaHa = (3.14159 * 50 * 50) / 10000 // 50m buffer area
+          const ratio = bufferAreaHa / farmArea
+
+          if (ratio > 1.5) {
+            return (
+              <div style={{
+                padding: 16,
+                marginBottom: 20,
+                background: '#fef3c7',
+                border: '1px solid #f59e0b',
+                borderLeft: '4px solid #f59e0b',
+                borderRadius: 6
+              }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'start' }}>
+                  <AlertTriangle size={20} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ color: '#92400e', display: 'block', marginBottom: 4 }}>
+                      ⚠️ Data Accuracy Warning
+                    </strong>
+                    <p style={{ fontSize: 14, margin: '0 0 8px 0', color: '#78350f' }}>
+                      This farm ({farmArea?.toFixed(1)} ha) doesn't have a defined boundary polygon. Satellite data is being
+                      sampled from a 50m circular buffer (~{bufferAreaHa.toFixed(1)} ha), which is {ratio.toFixed(1)}x larger than your farm.
+                    </p>
+                    <p style={{ fontSize: 13, margin: 0, color: '#78350f' }}>
+                      <strong>Impact:</strong> Health scores may include data from neighboring farms, forests, or roads.
+                      {hasRole('agronomist', 'admin') && ' Add a boundary polygon in the farm settings for accurate analysis.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+        }
+        return null
+      })()}
+
       {loading && <div className="loading"><div className="spinner" /><p>Loading stress data...</p></div>}
 
       {stress && !loading && (

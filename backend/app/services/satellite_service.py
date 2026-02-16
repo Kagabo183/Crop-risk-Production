@@ -188,70 +188,117 @@ class SatelliteDataService:
             return []
     
     def calculate_vegetation_indices(
-        self, 
+        self,
         image_data: Dict,
         lat: float,
         lon: float,
-        buffer_meters: float = 500
+        buffer_meters: float = 50,  # REDUCED from 500m to 50m!
+        farm_boundary=None,
+        farm_area: float = None
     ) -> Dict[str, float]:
         """
         Calculate vegetation indices from satellite imagery
-        
+
         Args:
             image_data: Image metadata from fetch_sentinel2_imagery
             lat: Latitude of farm center
             lon: Longitude of farm center
-            buffer_meters: Buffer radius around point in meters
-        
+            buffer_meters: Buffer radius around point in meters (default 50m, was 500m)
+            farm_boundary: GeoAlchemy2 Geometry object representing farm boundary (POLYGON)
+            farm_area: Farm area in hectares (for logging/validation)
+
         Returns:
             Dictionary with vegetation indices: {ndvi, ndre, ndwi, evi, savi}
         """
         if self.use_planetary_computer:
-            return self._calculate_indices_planetary_computer(image_data, lat, lon, buffer_meters)
+            return self._calculate_indices_planetary_computer(image_data, lat, lon, buffer_meters, farm_boundary, farm_area)
         else:
-            return self._calculate_indices_gee(image_data, lat, lon, buffer_meters)
+            return self._calculate_indices_gee(image_data, lat, lon, buffer_meters, farm_boundary, farm_area)
     
     def _calculate_indices_gee(
-        self, 
+        self,
         image_data: Dict,
         lat: float,
         lon: float,
-        buffer_meters: float
+        buffer_meters: float,
+        farm_boundary=None,
+        farm_area: float = None
     ) -> Dict[str, float]:
         """Calculate vegetation indices using Google Earth Engine"""
         try:
+            from geoalchemy2.shape import to_shape
+            import json
+
             image = image_data['image']
             point = ee.Geometry.Point([lon, lat])
-            region = point.buffer(buffer_meters)
-            
+
+            # Use farm boundary if available, otherwise use buffer
+            if farm_boundary is not None:
+                try:
+                    # Convert GeoAlchemy2 geometry to Shapely
+                    shapely_geom = to_shape(farm_boundary)
+                    # Convert Shapely to GeoJSON
+                    geojson = json.loads(json.dumps(shapely_geom.__geo_interface__))
+                    # Convert to EE Geometry
+                    region = ee.Geometry(geojson)
+
+                    # Calculate actual analyzed area
+                    analyzed_area_ha = region.area().divide(10000).getInfo()  # m² to hectares
+
+                    logger.info(f"✓ Using ACTUAL farm boundary polygon (area: {analyzed_area_ha:.2f} ha)")
+                    if farm_area and abs(analyzed_area_ha - farm_area) > farm_area * 0.1:
+                        logger.warning(f"⚠️ Boundary area ({analyzed_area_ha:.2f} ha) differs from recorded farm area ({farm_area:.2f} ha)")
+
+                except Exception as e:
+                    logger.warning(f"Failed to use farm boundary, falling back to buffer: {e}")
+                    region = point.buffer(buffer_meters)
+                    analyzed_area_ha = (3.14159 * buffer_meters * buffer_meters) / 10000
+                    logger.warning(f"⚠️ Using {buffer_meters}m buffer (area: {analyzed_area_ha:.2f} ha) - Farm area: {farm_area:.2f} ha")
+                    if farm_area and analyzed_area_ha > farm_area * 2:
+                        logger.error(f"🚨 CRITICAL: Buffer area ({analyzed_area_ha:.2f} ha) is {analyzed_area_ha/farm_area:.1f}x larger than farm ({farm_area:.2f} ha)! Data may include forests/neighboring farms!")
+            else:
+                region = point.buffer(buffer_meters)
+                analyzed_area_ha = (3.14159 * buffer_meters * buffer_meters) / 10000
+
+                if farm_area:
+                    ratio = analyzed_area_ha / farm_area
+                    if ratio > 2:
+                        logger.error(f"🚨 CRITICAL: Buffer area ({analyzed_area_ha:.2f} ha) is {ratio:.1f}x LARGER than farm ({farm_area:.2f} ha)! Data contaminated by surrounding land!")
+                    elif ratio > 1.5:
+                        logger.warning(f"⚠️ WARNING: Buffer area ({analyzed_area_ha:.2f} ha) is {ratio:.1f}x larger than farm ({farm_area:.2f} ha)")
+                    else:
+                        logger.info(f"Using {buffer_meters}m buffer (area: {analyzed_area_ha:.2f} ha) for farm (area: {farm_area:.2f} ha)")
+                else:
+                    logger.info(f"Using {buffer_meters}m buffer (area: {analyzed_area_ha:.2f} ha) - no farm area recorded")
+
             # Select bands
             nir = image.select('B8')  # Near-Infrared
             red = image.select('B4')  # Red
             red_edge = image.select('B5')  # Red Edge
             green = image.select('B3')  # Green
             blue = image.select('B2')  # Blue
-            
+
             # Calculate NDVI: (NIR - Red) / (NIR + Red)
             ndvi = nir.subtract(red).divide(nir.add(red)).rename('NDVI')
-            
+
             # Calculate NDRE: (NIR - RedEdge) / (NIR + RedEdge)
             ndre = nir.subtract(red_edge).divide(nir.add(red_edge)).rename('NDRE')
-            
+
             # Calculate NDWI: (Green - NIR) / (Green + NIR)
             ndwi = green.subtract(nir).divide(green.add(nir)).rename('NDWI')
-            
+
             # Calculate EVI: 2.5 * ((NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1))
             evi = nir.subtract(red).divide(
                 nir.add(red.multiply(6)).subtract(blue.multiply(7.5)).add(1)
             ).multiply(2.5).rename('EVI')
-            
+
             # Calculate SAVI: ((NIR - Red) / (NIR + Red + L)) * (1 + L), L=0.5
             L = 0.5
             savi = nir.subtract(red).divide(nir.add(red).add(L)).multiply(1 + L).rename('SAVI')
-            
+
             # Combine all indices
             indices = ee.Image.cat([ndvi, ndre, ndwi, evi, savi])
-            
+
             # Calculate mean values over the region
             stats = indices.reduceRegion(
                 reducer=ee.Reducer.mean(),
@@ -259,7 +306,7 @@ class SatelliteDataService:
                 scale=10,  # 10m resolution
                 maxPixels=1e9
             ).getInfo()
-            
+
             return {
                 'ndvi': stats.get('NDVI'),
                 'ndre': stats.get('NDRE'),
@@ -267,28 +314,36 @@ class SatelliteDataService:
                 'evi': stats.get('EVI'),
                 'savi': stats.get('SAVI')
             }
-            
+
         except Exception as e:
             logger.error(f"Error calculating vegetation indices with GEE: {e}")
             return {}
     
     def _calculate_indices_planetary_computer(
-        self, 
+        self,
         image_data: Dict,
         lat: float,
         lon: float,
-        buffer_meters: float
+        buffer_meters: float,
+        farm_boundary=None,
+        farm_area: float = None
     ) -> Dict[str, float]:
         """Calculate vegetation indices using Microsoft Planetary Computer"""
         try:
+            # Log buffer vs farm area warning
+            if farm_area:
+                analyzed_area_ha = (3.14159 * buffer_meters * buffer_meters) / 10000
+                if analyzed_area_ha > farm_area * 2:
+                    logger.error(f"🚨 CRITICAL: Buffer area ({analyzed_area_ha:.2f} ha) is {analyzed_area_ha/farm_area:.1f}x larger than farm ({farm_area:.2f} ha)!")
+
             base_val = (lat + lon) * 100
             seed_val = int(base_val) + int(image_data.get('date', datetime.now()).timestamp())
             random.seed(seed_val)
-            
+
             # Generate realistic simulated values based on location consistency
             # NDVI: 0.4-0.8 for healthy vegetation, lower for stressed crops
             base_ndvi = random.uniform(0.45, 0.75)
-            logger.info(f"Generating simulated vegetation indices (NDVI: {base_ndvi:.3f}) for ({lat}, {lon})")
+            logger.warning(f"⚠️ Generating SIMULATED vegetation indices (NDVI: {base_ndvi:.3f}) for ({lat}, {lon}) - NOT real satellite data!")
 
             return {
                 'ndvi': round(base_ndvi, 4),
@@ -419,12 +474,14 @@ class SatelliteDataService:
         # Process each image
         processed_images = []
         for img_data in imagery:
-            # Calculate vegetation indices
+            # Calculate vegetation indices using farm boundary if available
             indices = self.calculate_vegetation_indices(
                 img_data,
                 farm.latitude,
                 farm.longitude,
-                buffer_meters=500
+                buffer_meters=50,  # REDUCED from 500m to 50m
+                farm_boundary=farm.boundary,  # Use actual farm polygon
+                farm_area=farm.area  # Pass farm area for validation
             )
             
             # Create database record

@@ -514,6 +514,43 @@ export default function Farms() {
                   </div>
                 )}
 
+                {/* Buffer Size Warning for farms without boundaries */}
+                {hasCoords && farm.area && !farm.boundary && (() => {
+                  const bufferAreaHa = (3.14159 * 50 * 50) / 10000  // 50m buffer
+                  const ratio = bufferAreaHa / farm.area
+
+                  if (ratio > 1.5) {
+                    return (
+                      <div style={{
+                        marginTop: 16,
+                        padding: 10,
+                        background: '#fef3c7',
+                        border: '1px solid #f59e0b',
+                        borderRadius: 6,
+                        fontSize: 12
+                      }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
+                          <span style={{ fontSize: 16 }}>⚠️</span>
+                          <div>
+                            <strong style={{ color: '#92400e', display: 'block', marginBottom: 2 }}>
+                              Data may be inaccurate
+                            </strong>
+                            <div style={{ color: '#78350f', lineHeight: 1.4 }}>
+                              Farm size: {farm.area.toFixed(1)} ha • Sampled area: ~{bufferAreaHa.toFixed(1)} ha ({ratio.toFixed(1)}x larger)
+                            </div>
+                            {hasRole('agronomist', 'admin') && (
+                              <div style={{ marginTop: 4, fontSize: 11, color: '#78350f' }}>
+                                Add a boundary polygon for accurate analysis
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
+                  return null
+                })()}
+
                 {/* Satellite Fetch Progress / Button */}
                 {hasCoords && (
                   <div style={{ marginTop: 16 }}>
