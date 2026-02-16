@@ -247,8 +247,50 @@ export default function Dashboard() {
                   const ndwi = sat?.ndwi
                   const evi = sat?.evi
                   const savi = sat?.savi
-                  // NDVI interpretation: >=0.6 healthy, 0.4-0.6 moderate, <0.4 stressed
-                  const status = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'stressed'
+
+                  // Calculate composite health score using ALL 5 indices (not just NDVI!)
+                  // This uses the same algorithm as the backend's vegetation health classification
+                  const calculateCompositeHealth = () => {
+                    if (ndvi == null) return null
+
+                    // Scale each index to 0-100 score based on agricultural thresholds
+                    const scaleValue = (val, low, high) => {
+                      if (val == null) return null
+                      const score = ((val - low) / (high - low)) * 100
+                      return Math.max(0, Math.min(100, score))
+                    }
+
+                    // Thresholds based on agricultural remote sensing for tropical crops
+                    const ndviScore = scaleValue(ndvi, 0.15, 0.70)  // Overall greenness/biomass
+                    const ndwiScore = scaleValue(ndwi, -0.30, 0.05) // Water/moisture stress
+                    const ndreScore = scaleValue(ndre, 0.05, 0.35)  // Chlorophyll/nitrogen
+                    const eviScore = scaleValue(evi, 0.10, 0.50)    // Canopy density
+                    const saviScore = scaleValue(savi, 0.10, 0.55)  // Crop coverage
+
+                    // Weighted composite: NDVI (30%), NDWI (25%), NDRE (20%), EVI (15%), SAVI (10%)
+                    const weights = { ndvi: 0.30, ndwi: 0.25, ndre: 0.20, evi: 0.15, savi: 0.10 }
+                    const scores = { ndvi: ndviScore, ndwi: ndwiScore, ndre: ndreScore, evi: eviScore, savi: saviScore }
+
+                    let totalWeight = 0
+                    let weightedSum = 0
+                    for (const [key, score] of Object.entries(scores)) {
+                      if (score != null) {
+                        weightedSum += score * weights[key]
+                        totalWeight += weights[key]
+                      }
+                    }
+
+                    return totalWeight > 0 ? weightedSum / totalWeight : null
+                  }
+
+                  const compositeHealth = calculateCompositeHealth()
+
+                  // Status from composite score: ≥75 = healthy, 40-75 = moderate, <40 = stressed
+                  const status = compositeHealth == null
+                    ? 'unknown'
+                    : compositeHealth >= 75 ? 'healthy'
+                    : compositeHealth >= 40 ? 'moderate'
+                    : 'stressed'
 
                   // Farmer-friendly status messages
                   const displayStatus = hasRole('agronomist', 'admin')
