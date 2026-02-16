@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.models.farm import Farm as FarmModel
 from app.models.user import User as UserModel
 from app.core.auth import get_current_active_user, require_farmer_or_above
+from app.tasks.satellite_tasks import process_single_farm
 
 router = APIRouter()
 
@@ -125,7 +126,8 @@ def get_farms(
     if current_user.role == "farmer":
         query = query.filter(FarmModel.owner_id == current_user.id)
     elif current_user.role == "agronomist" and current_user.district:
-        query = query.filter(FarmModel.location == current_user.district)
+        # Match both "District" and "District - Sector" location formats
+        query = query.filter(FarmModel.location.ilike(f"{current_user.district}%"))
     farms = query.offset(skip).limit(limit).all()
     return [_farm_to_out(f) for f in farms]
 
@@ -151,6 +153,14 @@ def create_farm(
     db.add(db_farm)
     db.commit()
     db.refresh(db_farm)
+
+    # Auto-trigger satellite data fetch if farm has coordinates
+    if db_farm.latitude and db_farm.longitude:
+        try:
+            process_single_farm.delay(db_farm.id, 30)
+        except Exception:
+            pass  # Don't fail farm creation if Celery is unavailable
+
     return _farm_to_out(db_farm)
 
 
@@ -168,11 +178,20 @@ def update_farm(
         raise HTTPException(status_code=403, detail="Not your farm")
 
     update_data = farm.model_dump(exclude_unset=True)
+    coords_changed = 'latitude' in update_data or 'longitude' in update_data
     for key, value in update_data.items():
         setattr(db_farm, key, value)
 
     db.commit()
     db.refresh(db_farm)
+
+    # Re-fetch satellite data if coordinates changed
+    if coords_changed and db_farm.latitude and db_farm.longitude:
+        try:
+            process_single_farm.delay(db_farm.id, 30)
+        except Exception:
+            pass
+
     return _farm_to_out(db_farm)
 
 

@@ -330,8 +330,8 @@ Monitor vegetation health through NDVI satellite data with custom date ranges.
 **How to fetch satellite data:**
 1. Select a farm from the dropdown
 2. Set **Start Date** and **End Date** (defaults to last 90 days)
-3. Click **"Fetch Satellite Data"** to generate simulated NDVI records for the selected range
-4. Or click **"Download from Copernicus"** to trigger a real Sentinel-2 data pipeline
+3. Click **"Fetch Satellite Data"** to download real Sentinel-2 imagery from Google Earth Engine and calculate actual vegetation indices (NDVI, NDRE, NDWI, EVI, SAVI) from satellite pixels
+4. Or click **"Download from Copernicus"** to use Copernicus DataSpace as an alternative data source
 
 **Features:**
 - **Stats cards**: Current NDVI, status, data source, last update date
@@ -457,9 +457,14 @@ PROJECT_NAME=Crop Risk Prediction Platform
 ### Optional Environment Variables
 
 ```bash
-# Google Earth Engine (for satellite data)
-GEE_SERVICE_ACCOUNT_EMAIL=your-account@project.iam.gserviceaccount.com
-GEE_PRIVATE_KEY_PATH=/app/data/earthengine/private-key.json
+# Google Earth Engine (for real satellite data processing)
+# OAuth method (recommended for development)
+GEE_PROJECT=your-gcp-project-id  # e.g., principal-rhino-482514-f1
+# Credentials stored in: data/earthengine/credentials
+
+# OR Service Account method (for production)
+# GEE_SERVICE_ACCOUNT_EMAIL=your-account@project.iam.gserviceaccount.com
+# GEE_PRIVATE_KEY_PATH=/app/data/earthengine/private-key.json
 
 # Weather APIs (optional - system has fallbacks)
 ERA5_API_KEY=your-era5-key

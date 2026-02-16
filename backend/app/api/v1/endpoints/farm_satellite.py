@@ -33,16 +33,18 @@ def get_farms_with_satellite_data(
     if current_user.role == "farmer":
         query = query.filter(Farm.owner_id == current_user.id)
     elif current_user.role == "agronomist" and current_user.district:
-        query = query.filter(Farm.location == current_user.district)
+        query = query.filter(Farm.location.ilike(f"{current_user.district}%"))
         
     farms = query.all()
     result = []
 
     for farm in farms:
         # Get latest satellite image for this farm using the farm_id column
+        # Prioritize images with non-NULL NDVI values
         latest_image = (
             db.query(SatelliteImage)
             .filter(SatelliteImage.farm_id == farm.id)
+            .filter(SatelliteImage.mean_ndvi.isnot(None))
             .order_by(desc(SatelliteImage.acquisition_date))
             .first()
         )
@@ -55,6 +57,10 @@ def get_farms_with_satellite_data(
             "latitude": farm.latitude,
             "longitude": farm.longitude,
             "ndvi": None,
+            "ndre": None,
+            "ndwi": None,
+            "evi": None,
+            "savi": None,
             "ndvi_date": None,
             "image_type": None,
             "ndvi_status": "unknown",
@@ -77,6 +83,16 @@ def get_farms_with_satellite_data(
                 farm_data["image_type"] = latest_image.image_type
                 farm_data["data_source"] = latest_image.source or "simulated"
                 farm_data["cloud_cover"] = latest_image.cloud_cover_percent
+
+                # Include all vegetation indices
+                if latest_image.mean_ndre is not None:
+                    farm_data["ndre"] = round(latest_image.mean_ndre, 4)
+                if latest_image.mean_ndwi is not None:
+                    farm_data["ndwi"] = round(latest_image.mean_ndwi, 4)
+                if latest_image.mean_evi is not None:
+                    farm_data["evi"] = round(latest_image.mean_evi, 4)
+                if latest_image.mean_savi is not None:
+                    farm_data["savi"] = round(latest_image.mean_savi, 4)
 
                 # Classify NDVI status
                 if ndvi_value >= 0.6:

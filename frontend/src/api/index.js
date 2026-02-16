@@ -77,6 +77,9 @@ export const getNutrientAssessment = (farmId, daysBack = 30) =>
 export const triggerSatelliteDownload = (farmId, daysBack = 30) =>
   api.post('/stress-monitoring/trigger-download', { farm_id: farmId, days_back: daysBack })
 
+export const getTaskStatus = (taskId) =>
+  api.get(`/stress-monitoring/task-status/${taskId}`)
+
 // ── Farm Satellite ──
 export const getFarmSatellite = () => api.get('/farm-satellite/')
 
@@ -97,15 +100,22 @@ export const fetchPipelineData = (startDate, endDate) =>
   })
 
 // ── ML ──
-export const classifyDisease = (file, cropType) => {
+export const classifyDisease = (file, cropType, farmId = null) => {
   const form = new FormData()
   form.append('file', file)
-  const params = cropType ? { crop_type: cropType } : {}
+  const params = {}
+  if (cropType) params.crop_type = cropType
+  if (farmId) params.farm_id = farmId
   return api.post('/ml/classify-disease', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     params,
   })
 }
+
+export const getClassificationHistory = (limit = 20, farmId = null) =>
+  api.get('/ml/classification-history', {
+    params: { limit, farm_id: farmId || undefined },
+  })
 
 export const getSupportedDiseases = () => api.get('/ml/supported-diseases')
 

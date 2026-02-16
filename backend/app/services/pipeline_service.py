@@ -36,9 +36,9 @@ except ImportError:
 class PipelineService:
     """Centralized pipeline for satellite data processing and analysis"""
     
-    # Copernicus credentials
-    COPERNICUS_USERNAME = "kagaboriziki@gmail.com"
-    COPERNICUS_PASSWORD = "Kagaboriziki@183"
+    # Copernicus credentials (from environment variables — never hardcode)
+    COPERNICUS_USERNAME = os.environ.get('COPERNICUS_USERNAME', '')
+    COPERNICUS_PASSWORD = os.environ.get('COPERNICUS_PASSWORD', '')
     TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
     SEARCH_URL = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
     

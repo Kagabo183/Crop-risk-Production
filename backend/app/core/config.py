@@ -30,7 +30,17 @@ class Settings(BaseSettings):
     # External APIs
     SENTINEL_API_KEY: Optional[str] = None
     WEATHER_API_KEY: Optional[str] = None
-    
+
+    # Copernicus DataSpace (satellite imagery)
+    COPERNICUS_USERNAME: Optional[str] = None
+    COPERNICUS_PASSWORD: Optional[str] = None
+
+    # Google Earth Engine (real satellite data processing)
+    GEE_PROJECT: Optional[str] = None
+    GEE_SERVICE_ACCOUNT_EMAIL: Optional[str] = None
+    GEE_PRIVATE_KEY_PATH: Optional[str] = None
+    USE_PLANETARY_COMPUTER: bool = False
+
     # Weather Data Sources
     ERA5_API_URL: Optional[str] = None  # ECMWF/Copernicus Climate Data Store API URL
     ERA5_API_KEY: Optional[str] = None  # ECMWF/Copernicus Climate Data Store

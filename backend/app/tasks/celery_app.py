@@ -4,15 +4,22 @@ import os
 
 # Broker/res backend configuration - prefer explicit env vars set by the environment
 BROKER = os.environ.get('CELERY_BROKER_URL') or (f"redis://{os.environ.get('REDIS_URL') or os.environ.get('REDIS_HOST','redis')}:6379/0")
-RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND') or os.environ.get('CELERY_RESULT_BACKEND')
+RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND') or BROKER  # Default to same Redis as broker
 
 celery_app = Celery('crop_risk')
 celery_app.conf.broker_url = BROKER
-if RESULT_BACKEND:
-    celery_app.conf.result_backend = RESULT_BACKEND
+celery_app.conf.result_backend = RESULT_BACKEND
 celery_app.conf.task_serializer = 'json'
 celery_app.conf.result_serializer = 'json'
 celery_app.conf.accept_content = ['json']
+
+# Auto-import all task modules so @shared_task decorators register with the worker
+celery_app.conf.include = [
+    'app.tasks.satellite_tasks',
+    'app.tasks.weather_tasks',
+    'app.tasks.ml_tasks',
+    'app.tasks.process_tasks',
+]
 
 # Run periodic scanner every 10 minutes to auto-enqueue processing of new TIFFs
 celery_app.conf.timezone = 'UTC'

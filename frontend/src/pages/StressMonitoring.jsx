@@ -25,7 +25,10 @@ export default function StressMonitoring() {
     getFarms().then(r => {
       setFarms(r.data)
       if (r.data.length) setSelectedFarm(r.data[0].id)
-    }).catch(() => {})
+    }).catch(err => {
+      console.error('Failed to load farms:', err)
+      setError('Unable to load farms. Please refresh the page.')
+    })
   }, [])
 
   const loadData = async () => {
@@ -49,8 +52,13 @@ export default function StressMonitoring() {
     if (results[4].status === 'fulfilled') setWater(results[4].value.data)
     if (results[5].status === 'fulfilled') setHeat(results[5].value.data)
 
-    const anyFailed = results.every(r => r.status === 'rejected')
-    if (anyFailed) setError('Failed to load stress data. Make sure the backend is running.')
+    // Check if ANY requests failed (not ALL)
+    const anyFailed = results.some(r => r.status === 'rejected')
+    if (anyFailed) {
+      const failedCount = results.filter(r => r.status === 'rejected').length
+      console.warn(`${failedCount} of ${results.length} stress monitoring requests failed`)
+      setError(`Some stress data failed to load (${failedCount}/${results.length}). Data may be incomplete.`)
+    }
 
     setLoading(false)
   }
@@ -212,31 +220,116 @@ export default function StressMonitoring() {
           <div className="grid-3">
             {drought && (
               <div className="card">
-                <div className="card-header"><h3><Sun size={16} style={{ verticalAlign: -2 }} /> Drought</h3></div>
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> Drought Stress</h3>
+                  <span className={`badge ${drought.level}`} style={{ textTransform: 'capitalize' }}>{drought.level}</span>
+                </div>
                 <div className="card-body">
-                  <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
-                    {JSON.stringify(drought, null, 2).substring(0, 500)}
-                  </pre>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 32, fontWeight: 600, color: drought.score >= 60 ? 'var(--danger)' : drought.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
+                      {drought.score}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Drought Score (0-100)</div>
+                  </div>
+                  {drought.message && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{drought.message}</p>
+                  )}
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI</span>
+                      <strong>{drought.ndvi?.toFixed(3) ?? 'N/A'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDWI</span>
+                      <strong>{drought.ndwi?.toFixed(3) ?? 'N/A'}</strong>
+                    </div>
+                    {drought.rainfall_deficit_percent != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Rainfall Deficit</span>
+                        <strong style={{ color: drought.rainfall_deficit_percent > 50 ? 'var(--danger)' : 'var(--text)' }}>
+                          {drought.rainfall_deficit_percent.toFixed(1)}%
+                        </strong>
+                      </div>
+                    )}
+                    {drought.ndvi_trend != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Trend</span>
+                        <strong style={{ color: drought.ndvi_trend < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                          {drought.ndvi_trend > 0 ? '+' : ''}{drought.ndvi_trend.toFixed(4)}
+                        </strong>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
             {water && (
               <div className="card">
-                <div className="card-header"><h3><Droplets size={16} style={{ verticalAlign: -2 }} /> Water Stress</h3></div>
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3><Droplets size={16} style={{ verticalAlign: -2 }} /> Water Stress</h3>
+                  <span className={`badge ${water.level}`} style={{ textTransform: 'capitalize' }}>{water.level}</span>
+                </div>
                 <div className="card-body">
-                  <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
-                    {JSON.stringify(water, null, 2).substring(0, 500)}
-                  </pre>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 32, fontWeight: 600, color: water.score >= 60 ? 'var(--danger)' : water.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
+                      {water.score}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Water Stress Score (0-100)</div>
+                  </div>
+                  {water.message && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{water.message}</p>
+                  )}
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDWI</span>
+                      <strong>{water.ndwi?.toFixed(3) ?? 'N/A'}</strong>
+                    </div>
+                    {water.ndvi_decline_rate != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Decline Rate</span>
+                        <strong style={{ color: water.ndvi_decline_rate < -0.02 ? 'var(--danger)' : 'var(--text)' }}>
+                          {water.ndvi_decline_rate.toFixed(4)}
+                        </strong>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
             {heat && (
               <div className="card">
-                <div className="card-header"><h3><Sun size={16} style={{ verticalAlign: -2 }} /> Heat Stress</h3></div>
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> Heat Stress</h3>
+                  <span className={`badge ${heat.level}`} style={{ textTransform: 'capitalize' }}>{heat.level}</span>
+                </div>
                 <div className="card-body">
-                  <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
-                    {JSON.stringify(heat, null, 2).substring(0, 500)}
-                  </pre>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 32, fontWeight: 600, color: heat.score >= 60 ? 'var(--danger)' : heat.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
+                      {heat.score}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Heat Stress Score (0-100)</div>
+                  </div>
+                  {heat.message && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{heat.message}</p>
+                  )}
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {heat.heat_stress_days != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Heat Stress Days</span>
+                        <strong style={{ color: heat.heat_stress_days > 3 ? 'var(--danger)' : 'var(--text)' }}>
+                          {heat.heat_stress_days} {heat.heat_stress_days === 1 ? 'day' : 'days'}
+                        </strong>
+                      </div>
+                    )}
+                    {heat.ndvi_decline_rate != null && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Decline Rate</span>
+                        <strong style={{ color: heat.ndvi_decline_rate < -0.02 ? 'var(--danger)' : 'var(--text)' }}>
+                          {heat.ndvi_decline_rate.toFixed(4)}
+                        </strong>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

@@ -297,12 +297,17 @@ def batch_risk_assessment_task() -> Dict[str, Any]:
                 if result['risk_level'] in ['high', 'critical']:
                     high_risk_farms.append(farm.id)
 
+                    action_days = (1, 3) if result['risk_level'] == 'critical' else (2, 5)
                     alert = Alert(
                         farm_id=farm.id,
                         message=f"[ML] {result['risk_level'].upper()} risk detected "
                                f"(score: {result['overall_risk_score']:.0f}). "
                                f"Primary driver: {result['primary_driver']}",
-                        level=result['risk_level']
+                        level=result['risk_level'],
+                        alert_type='risk_assessment',
+                        source='ml_model',
+                        action_days_min=action_days[0],
+                        action_days_max=action_days[1],
                     )
                     db.add(alert)
 
@@ -373,11 +378,16 @@ def detect_anomalies_all_farms_task() -> Dict[str, Any]:
 
                 # Create alert for significant anomalies
                 if anomalies[0].get('severity') in ['severe', 'critical']:
+                    anom_days = (1, 3) if anomalies[0].get('severity') == 'critical' else (2, 5)
                     alert = Alert(
                         farm_id=farm.id,
                         message=f"[ML ANOMALY] {anomalies[0].get('anomaly_type', 'Unknown')} "
                                f"detected. Severity: {anomalies[0].get('severity')}",
-                        level='high'
+                        level='high',
+                        alert_type='anomaly_detection',
+                        source='ml_model',
+                        action_days_min=anom_days[0],
+                        action_days_max=anom_days[1],
                     )
                     db.add(alert)
 
@@ -458,7 +468,11 @@ def generate_health_forecasts_task(forecast_days: int = 7) -> Dict[str, Any]:
                             farm_id=farm.id,
                             message=f"[ML FORECAST] Declining health trend predicted. "
                                    f"Min forecast: {forecast.get('min_forecast', 0):.0f}",
-                            level='moderate'
+                            level='moderate',
+                            alert_type='health_forecast',
+                            source='ml_model',
+                            action_days_min=5,
+                            action_days_max=10,
                         )
                         db.add(alert)
                         alerts_created += 1

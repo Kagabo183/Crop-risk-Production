@@ -13,5 +13,7 @@ class Alert(Base):
     source = Column(String(50), nullable=True)  # 'simulated', 'ml_model', 'sensor', etc.
     alert_data = Column(JSON, nullable=True)  # Additional alert data (renamed from 'metadata')
     resolved = Column(Boolean, default=False)
+    action_days_min = Column(Integer, nullable=True)  # Min days to take action
+    action_days_max = Column(Integer, nullable=True)  # Max days to take action
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     farm = relationship("Farm")

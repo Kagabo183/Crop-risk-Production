@@ -165,229 +165,267 @@ TREATMENT_RECOMMENDATIONS = {
         "fungicides": ["Mancozeb", "Chlorothalonil", "Copper-based fungicides"],
         "cultural": ["Remove infected plants", "Improve air circulation", "Avoid overhead irrigation"],
         "urgency": "high",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 3],
     },
     "Early Blight": {
         "fungicides": ["Chlorothalonil", "Mancozeb", "Azoxystrobin"],
         "cultural": ["Remove lower infected leaves", "Crop rotation", "Mulching"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Apple Scab": {
         "fungicides": ["Captan", "Mancozeb", "Myclobutanil"],
         "cultural": ["Remove fallen leaves", "Prune for air circulation", "Resistant varieties"],
         "urgency": "medium",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [3, 7],
     },
     "Black Rot": {
         "fungicides": ["Captan", "Mancozeb", "Thiophanate-methyl"],
         "cultural": ["Remove mummified fruit", "Prune dead wood", "Clean pruning tools"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Cedar Apple Rust": {
         "fungicides": ["Myclobutanil", "Triadimefon", "Mancozeb"],
         "cultural": ["Remove nearby juniper hosts", "Resistant varieties", "Timely fungicide application"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Powdery Mildew": {
         "fungicides": ["Sulfur", "Neem oil", "Potassium bicarbonate"],
         "cultural": ["Improve air circulation", "Avoid overhead watering", "Remove infected leaves"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Coffee Rust": {
         "fungicides": ["Copper-based fungicides", "Triazole fungicides", "Strobilurin"],
         "cultural": ["Shade management", "Resistant varieties", "Proper spacing"],
         "urgency": "high",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 3],
     },
     "Gray Leaf Spot": {
         "fungicides": ["Strobilurin fungicides", "Triazole fungicides"],
         "cultural": ["Tillage to bury residue", "Crop rotation", "Resistant hybrids"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Common Rust": {
         "fungicides": ["Propiconazole", "Azoxystrobin", "Trifloxystrobin"],
         "cultural": ["Plant resistant varieties", "Timely planting", "Remove volunteer plants"],
         "urgency": "medium",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [3, 7],
     },
     "Northern Leaf Blight": {
         "fungicides": ["Propiconazole", "Azoxystrobin"],
         "cultural": ["Resistant varieties", "Crop rotation", "Residue management"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Bacterial Spot": {
         "fungicides": ["Copper-based sprays", "Streptomycin (where permitted)"],
         "cultural": ["Use disease-free seed", "Avoid overhead irrigation", "Crop rotation"],
         "urgency": "high",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [2, 5],
     },
     "Bacterial Blight": {
         "fungicides": ["Copper hydroxide", "Streptomycin"],
         "cultural": ["Use certified seed", "Remove crop debris", "Avoid working in wet fields"],
         "urgency": "high",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [2, 5],
     },
     "Bacterial Canker": {
         "fungicides": ["Copper oxychloride", "Bordeaux mixture"],
         "cultural": ["Prune infected branches", "Sterilize tools", "Avoid injury to trees"],
         "urgency": "high",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [2, 5],
     },
     "Leaf Mold": {
         "fungicides": ["Chlorothalonil", "Mancozeb"],
         "cultural": ["Improve ventilation", "Reduce humidity", "Prune lower leaves"],
         "urgency": "low",
-        "spread_risk": "low"
+        "spread_risk": "low",
+        "action_days": [7, 14],
     },
     "Septoria Leaf Spot": {
         "fungicides": ["Chlorothalonil", "Mancozeb", "Copper fungicides"],
         "cultural": ["Remove infected debris", "Avoid working in wet fields", "Stake plants"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Spider Mites": {
         "fungicides": ["Abamectin", "Bifenthrin", "Neem oil"],
         "cultural": ["Increase humidity", "Remove heavily infested leaves", "Introduce predatory mites"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Red Spider Mite": {
         "fungicides": ["Dicofol", "Wettable sulfur", "Neem oil"],
         "cultural": ["Maintain shade trees", "Water management", "Biological control"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Target Spot": {
         "fungicides": ["Chlorothalonil", "Azoxystrobin"],
         "cultural": ["Remove infected debris", "Improve air circulation", "Avoid wetting leaves"],
         "urgency": "low",
-        "spread_risk": "low"
+        "spread_risk": "low",
+        "action_days": [7, 14],
     },
     "Yellow Leaf Curl Virus": {
         "fungicides": ["Control whitefly vectors with insecticides"],
         "cultural": ["Remove infected plants", "Control whiteflies", "Use resistant varieties"],
         "urgency": "high",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 3],
     },
     "Mosaic Virus": {
         "fungicides": ["No chemical control available"],
         "cultural": ["Remove infected plants", "Control aphids", "Use virus-free seeds"],
         "urgency": "high",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [2, 5],
     },
     "Mosaic Disease": {
         "fungicides": ["No chemical cure — use clean planting material"],
         "cultural": ["Remove and burn infected plants", "Use CMD-resistant varieties", "Control whitefly vectors", "Use virus-free stem cuttings"],
         "urgency": "high",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 3],
     },
     "Brown Streak Disease": {
         "fungicides": ["No chemical cure available"],
         "cultural": ["Use CBSD-tolerant varieties", "Remove and burn infected plants", "Use virus-free planting material", "Control whitefly vectors"],
         "urgency": "critical",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 2],
     },
     "Green Mottle": {
         "fungicides": ["No chemical cure — viral disease"],
         "cultural": ["Use virus-free cuttings", "Remove infected plants", "Control aphid vectors", "Use resistant varieties"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Citrus Greening (HLB)": {
         "fungicides": ["Control psyllid vectors with insecticides"],
         "cultural": ["Remove infected trees", "Control Asian citrus psyllid", "Use certified nursery stock"],
         "urgency": "critical",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 2],
     },
     "Anthracnose": {
         "fungicides": ["Copper-based fungicides", "Mancozeb", "Carbendazim"],
         "cultural": ["Prune dead branches", "Remove fallen fruits", "Improve drainage"],
         "urgency": "high",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [2, 5],
     },
     "Die Back": {
         "fungicides": ["Copper oxychloride", "Carbendazim"],
         "cultural": ["Prune affected branches", "Apply wound dressing", "Improve tree vigor"],
         "urgency": "high",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [3, 7],
     },
     "Sooty Mould": {
         "fungicides": ["Control sap-sucking insects first", "Neem oil"],
         "cultural": ["Control mealybugs/aphids", "Wash leaves", "Improve air circulation"],
         "urgency": "low",
-        "spread_risk": "low"
+        "spread_risk": "low",
+        "action_days": [7, 14],
     },
     "Gall Midge": {
         "fungicides": ["Imidacloprid", "Lambda-cyhalothrin"],
         "cultural": ["Collect and destroy fallen buds", "Deep ploughing", "Timely spraying at bud stage"],
         "urgency": "high",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [3, 7],
     },
     "Cutting Weevil": {
         "fungicides": ["Carbaryl", "Quinalphos"],
         "cultural": ["Collect and destroy affected parts", "Clean cultivation", "Biological control"],
         "urgency": "medium",
-        "spread_risk": "low"
+        "spread_risk": "low",
+        "action_days": [7, 14],
     },
     "Aphids": {
         "fungicides": ["Imidacloprid", "Thiamethoxam", "Neem oil"],
         "cultural": ["Encourage natural predators", "Spray water to dislodge", "Remove weeds"],
         "urgency": "medium",
-        "spread_risk": "high"
+        "spread_risk": "high",
+        "action_days": [3, 7],
     },
     "Esca (Black Measles)": {
         "fungicides": ["No effective chemical control"],
         "cultural": ["Prune infected wood", "Protect pruning wounds", "Remove severely affected vines"],
         "urgency": "high",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [3, 7],
     },
     "Leaf Blight": {
         "fungicides": ["Mancozeb", "Copper-based fungicides"],
         "cultural": ["Remove infected leaves", "Improve air circulation", "Avoid overhead watering"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Leaf Scorch": {
         "fungicides": ["Captan", "Copper fungicides"],
         "cultural": ["Remove infected leaves", "Renovate beds after harvest", "Proper spacing"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Brown Spot": {
         "fungicides": ["Mancozeb", "Propiconazole", "Carbendazim"],
         "cultural": ["Use resistant varieties", "Balanced fertilization", "Proper water management"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Hispa": {
         "fungicides": ["Chlorpyrifos", "Quinalphos"],
         "cultural": ["Remove leaf tips with eggs", "Avoid excess nitrogen", "Encourage natural enemies"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Leaf Blast": {
         "fungicides": ["Tricyclazole", "Isoprothiolane", "Carbendazim"],
         "cultural": ["Use resistant varieties", "Balanced nitrogen", "Proper water management"],
         "urgency": "high",
-        "spread_risk": "very_high"
+        "spread_risk": "very_high",
+        "action_days": [1, 3],
     },
     "General Disease": {
         "fungicides": ["Broad-spectrum fungicide (consult local agronomist)"],
         "cultural": ["Remove infected parts", "Improve sanitation", "Consult plant pathologist"],
         "urgency": "medium",
-        "spread_risk": "medium"
+        "spread_risk": "medium",
+        "action_days": [5, 10],
     },
     "Healthy": {
         "fungicides": [],
         "cultural": ["Continue monitoring", "Maintain good practices"],
         "urgency": "none",
-        "spread_risk": "none"
+        "spread_risk": "none",
+        "action_days": None,
     }
 }
 

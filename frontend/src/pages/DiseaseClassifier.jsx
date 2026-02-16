@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Upload, Camera, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react'
-import { classifyDisease, getSupportedDiseases, getCropModels } from '../api'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { Upload, Camera, AlertTriangle, CheckCircle, Loader2, Clock, ChevronDown, ChevronUp } from 'lucide-react'
+import { classifyDisease, getSupportedDiseases, getCropModels, getClassificationHistory } from '../api'
 
 export default function DiseaseClassifier() {
   const [file, setFile] = useState(null)
@@ -12,17 +12,35 @@ export default function DiseaseClassifier() {
   const [supported, setSupported] = useState(null)
   const [cropModels, setCropModels] = useState([])
   const [dragover, setDragover] = useState(false)
+  const [history, setHistory] = useState([])
+  const [historyExpanded, setHistoryExpanded] = useState(null)
   const inputRef = useRef()
 
-  // Load supported diseases and crop models on first render
+  const loadHistory = useCallback(() => {
+    getClassificationHistory(20)
+      .then(r => setHistory(r.data.classifications || []))
+      .catch(err => {
+        console.warn('Failed to load classification history:', err)
+        setHistory([])  // Set to empty array on error
+      })
+  }, [])
+
+  // Load supported diseases, crop models, and history on first render
   useEffect(() => {
     getSupportedDiseases()
       .then(r => setSupported(r.data))
-      .catch(() => {})
+      .catch(err => {
+        console.error('Failed to load supported diseases:', err)
+        setError('Unable to load disease information. Please refresh the page.')
+      })
     getCropModels()
       .then(r => setCropModels(r.data.crop_models || []))
-      .catch(() => {})
-  }, [])
+      .catch(err => {
+        console.warn('Failed to load crop models:', err)
+        setCropModels([])  // Default to empty array
+      })
+    loadHistory()
+  }, [loadHistory])
 
   const handleFile = useCallback((f) => {
     if (!f) return
@@ -49,6 +67,7 @@ export default function DiseaseClassifier() {
     try {
       const res = await classifyDisease(file, cropType || undefined)
       setResult(res.data)
+      loadHistory()
     } catch (e) {
       setError(e.response?.data?.detail || e.message || 'Classification failed')
     }
@@ -228,12 +247,26 @@ export default function DiseaseClassifier() {
                     <h4>Treatment Recommendations</h4>
                     {result.treatment.urgency && (
                       <div style={{ marginBottom: 8, fontSize: 13 }}>
-                        Urgency: <span className={`badge ${result.treatment.urgency === 'high' || result.treatment.urgency === 'very_high' ? 'high' : 'moderate'}`}>
+                        Urgency: <span className={`badge ${result.treatment.urgency === 'high' || result.treatment.urgency === 'very_high' || result.treatment.urgency === 'critical' ? 'high' : 'moderate'}`}>
                           {result.treatment.urgency}
                         </span>
                         {result.treatment.spread_risk && (
                           <> | Spread risk: <span className={`badge ${result.treatment.spread_risk === 'very_high' || result.treatment.spread_risk === 'high' ? 'high' : 'moderate'}`}>
                             {result.treatment.spread_risk}
+                          </span></>
+                        )}
+                        {result.treatment.action_days && (
+                          <> | <span style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            background: result.treatment.action_days[0] <= 3 ? '#dc262620' : '#d9770620',
+                            color: result.treatment.action_days[0] <= 3 ? '#dc2626' : '#d97706',
+                            border: `1px solid ${result.treatment.action_days[0] <= 3 ? '#dc262640' : '#d9770640'}`,
+                          }}>
+                            Act within {result.treatment.action_days[0]}-{result.treatment.action_days[1]} days
                           </span></>
                         )}
                       </div>
@@ -281,6 +314,214 @@ export default function DiseaseClassifier() {
           </div>
         </div>
       </div>
+
+      {/* Classification History */}
+      {history.length > 0 && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <div className="card-header">
+            <h3><Clock size={18} style={{ verticalAlign: -3, marginRight: 6 }} />Recent Classifications</h3>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{history.length} results</span>
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
+                  <th style={{ padding: '10px 16px' }}>Image</th>
+                  <th style={{ padding: '10px 8px' }}>Plant</th>
+                  <th style={{ padding: '10px 8px' }}>Disease</th>
+                  <th style={{ padding: '10px 8px' }}>Confidence</th>
+                  <th style={{ padding: '10px 8px' }}>Model</th>
+                  <th style={{ padding: '10px 16px' }}>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h => {
+                  const isOpen = historyExpanded === h.id
+                  return (
+                    <React.Fragment key={h.id}>
+                      <tr
+                        style={{ borderBottom: isOpen ? 'none' : '1px solid var(--border)', cursor: 'pointer', background: isOpen ? 'var(--bg-secondary, rgba(0,0,0,0.02))' : undefined }}
+                        onClick={() => setHistoryExpanded(isOpen ? null : h.id)}
+                      >
+                        <td style={{ padding: '8px 16px' }}>
+                          {h.image_url ? (
+                            <img
+                              src={h.image_url}
+                              alt="leaf"
+                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 4 }}
+                            />
+                          ) : (
+                            <div style={{ width: 40, height: 40, background: 'var(--border)', borderRadius: 4 }} />
+                          )}
+                        </td>
+                        <td style={{ padding: '8px' }}>{h.plant}</td>
+                        <td style={{ padding: '8px' }}>
+                          <span style={{ color: h.is_healthy ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+                            {h.is_healthy ? 'Healthy' : h.disease}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <span style={{ color: confidenceColor(h.confidence), fontWeight: 600 }}>
+                            {(h.confidence * 100).toFixed(1)}%
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <span style={{
+                            fontSize: 10,
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            background: h.model_type === 'per_crop' ? 'var(--success)' : 'var(--text-secondary)',
+                            color: '#fff',
+                          }}>
+                            {h.model_type === 'per_crop' ? 'Specialized' : 'General'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                            {h.created_at ? new Date(h.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          </span>
+                          {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </td>
+                      </tr>
+
+                      {/* Expanded detail row */}
+                      {isOpen && (
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary, rgba(0,0,0,0.02))' }}>
+                          <td colSpan={6} style={{ padding: '16px' }}>
+                            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                              {/* Image preview */}
+                              {h.image_url && (
+                                <div style={{ flexShrink: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--text-secondary)' }}>Uploaded Image</div>
+                                  <img
+                                    src={h.image_url}
+                                    alt={`${h.plant} leaf`}
+                                    style={{ width: 200, height: 200, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }}
+                                  />
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                                    {h.original_filename || 'uploaded image'}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Classification details */}
+                              <div style={{ flex: 1, minWidth: 250 }}>
+                                {/* Main result header */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                                  <div>
+                                    <div style={{ fontSize: 18, fontWeight: 700 }}>
+                                      {h.is_healthy ? (
+                                        <span style={{ color: 'var(--success)' }}><CheckCircle size={18} style={{ verticalAlign: -3 }} /> Healthy</span>
+                                      ) : (
+                                        <span style={{ color: 'var(--danger)' }}><AlertTriangle size={18} style={{ verticalAlign: -3 }} /> {h.disease}</span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                                      Plant: <strong>{h.plant}</strong>
+                                      {h.crop_type && <> | Crop: <strong>{h.crop_type}</strong></>}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: 24, fontWeight: 700, color: confidenceColor(h.confidence) }}>
+                                      {(h.confidence * 100).toFixed(1)}%
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>confidence</div>
+                                  </div>
+                                </div>
+
+                                {/* Confidence bar */}
+                                <div className="confidence-bar" style={{ marginBottom: 16 }}>
+                                  <div className="confidence-fill" style={{
+                                    width: `${h.confidence * 100}%`,
+                                    background: confidenceColor(h.confidence),
+                                  }} />
+                                </div>
+
+                                {/* Top 5 predictions */}
+                                {h.top5 && h.top5.length > 0 && (
+                                  <div style={{ marginBottom: 16 }}>
+                                    <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Top 5 Predictions</h4>
+                                    {h.top5.map((item, i) => (
+                                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12 }}>
+                                        <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                                          {i + 1}
+                                        </span>
+                                        <span style={{ flex: 1 }}>
+                                          {item.plant || h.plant} — {item.disease || 'Unknown'}
+                                        </span>
+                                        <div style={{ width: 80 }}>
+                                          <div className="confidence-bar" style={{ height: 4 }}>
+                                            <div className="confidence-fill" style={{
+                                              width: `${(item.confidence || 0) * 100}%`,
+                                              background: confidenceColor(item.confidence || 0),
+                                            }} />
+                                          </div>
+                                        </div>
+                                        <span style={{ fontWeight: 600, color: confidenceColor(item.confidence || 0), width: 45, textAlign: 'right' }}>
+                                          {((item.confidence || 0) * 100).toFixed(1)}%
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Treatment recommendations */}
+                                {h.treatment && !h.is_healthy && Object.keys(h.treatment).length > 0 && (
+                                  <div style={{ background: 'var(--bg-primary, #fff)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
+                                    <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Treatment Recommendations</h4>
+                                    {h.treatment.urgency && (
+                                      <div style={{ marginBottom: 6, fontSize: 12 }}>
+                                        Urgency: <span className={`badge ${h.treatment.urgency === 'high' || h.treatment.urgency === 'very_high' || h.treatment.urgency === 'critical' ? 'high' : 'moderate'}`}>
+                                          {h.treatment.urgency}
+                                        </span>
+                                        {h.treatment.spread_risk && (
+                                          <> | Spread risk: <span className={`badge ${h.treatment.spread_risk === 'very_high' || h.treatment.spread_risk === 'high' ? 'high' : 'moderate'}`}>
+                                            {h.treatment.spread_risk}
+                                          </span></>
+                                        )}
+                                        {h.treatment.action_days && (
+                                          <> | <span style={{
+                                            display: 'inline-block',
+                                            padding: '2px 8px',
+                                            borderRadius: 4,
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            background: h.treatment.action_days[0] <= 3 ? '#dc262620' : '#d9770620',
+                                            color: h.treatment.action_days[0] <= 3 ? '#dc2626' : '#d97706',
+                                            border: `1px solid ${h.treatment.action_days[0] <= 3 ? '#dc262640' : '#d9770640'}`,
+                                          }}>
+                                            Act within {h.treatment.action_days[0]}-{h.treatment.action_days[1]} days
+                                          </span></>
+                                        )}
+                                      </div>
+                                    )}
+                                    {h.treatment.fungicides && (
+                                      <div style={{ marginBottom: 6, fontSize: 12 }}>
+                                        <strong>Fungicides:</strong>
+                                        <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>{h.treatment.fungicides.map((f, i) => <li key={i}>{f}</li>)}</ul>
+                                      </div>
+                                    )}
+                                    {h.treatment.cultural && (
+                                      <div style={{ fontSize: 12 }}>
+                                        <strong>Cultural practices:</strong>
+                                        <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>{h.treatment.cultural.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   )
 }

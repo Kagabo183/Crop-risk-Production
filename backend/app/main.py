@@ -1,8 +1,17 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.v1.api import api_router
 
 app = FastAPI(title="Crop Risk Platform API", openapi_url="/api/v1/openapi.json")
+
+# Serve uploaded classification images at /uploads/
+uploads_dir = Path(os.environ.get('UPLOAD_DIR', '/app/data/uploads'))
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # Configure CORS to allow requests from the frontend
 origins = [

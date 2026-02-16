@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from 'recharts'
-import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
 import { getEarlyWarnings, fetchWeatherAll } from '../api'
 
 const LEVEL_COLORS = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706', low: '#16a34a' }
@@ -166,6 +166,24 @@ export default function EarlyWarning() {
                     </span>
                   )}
                 </div>
+                {/* Action Days */}
+                {a.action_days_min && a.action_days_max && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 10px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: a.action_days_min <= 3 ? '#dc262620' : '#d9770620',
+                    color: a.action_days_min <= 3 ? '#dc2626' : '#d97706',
+                    border: `1px solid ${a.action_days_min <= 3 ? '#dc262640' : '#d9770640'}`,
+                  }}>
+                    <Clock size={12} />
+                    Act within {a.action_days_min}-{a.action_days_max} days
+                  </div>
+                )}
               </div>
 
               {/* Recommendations */}

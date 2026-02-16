@@ -205,6 +205,42 @@ def trigger_satellite_download(
     }
 
 
+@router.get("/task-status/{task_id}")
+def get_task_status(
+    task_id: str,
+    current_user: UserModel = Depends(get_current_active_user),
+):
+    """Get the progress of a Celery background task."""
+    from app.tasks.celery_app import celery_app
+    result = celery_app.AsyncResult(task_id)
+
+    if result.state == 'PENDING':
+        return {"state": "PENDING", "percent": 0, "stage": "Queued..."}
+    elif result.state == 'PROGRESS':
+        info = result.info or {}
+        return {
+            "state": "PROGRESS",
+            "percent": info.get('percent', 0),
+            "stage": info.get('stage', 'Processing...'),
+            "farm_id": info.get('farm_id'),
+        }
+    elif result.state == 'SUCCESS':
+        info = result.result or {}
+        return {
+            "state": "SUCCESS",
+            "percent": 100,
+            "stage": "Complete",
+            "farm_id": info.get('farm_id'),
+            "images_processed": info.get('images_processed', 0),
+            "health_score": info.get('health_score'),
+            "stress_level": info.get('stress_level'),
+        }
+    elif result.state == 'FAILURE':
+        return {"state": "FAILURE", "percent": 0, "stage": "Failed", "error": str(result.info)}
+    else:
+        return {"state": result.state, "percent": 0, "stage": result.state}
+
+
 @router.get("/stress-zones/{farm_id}")
 def get_stress_zones(
     farm_id: int,

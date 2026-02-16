@@ -20,7 +20,7 @@ def get_alerts(
     if current_user.role == "farmer":
         query = query.filter(Farm.owner_id == current_user.id)
     elif current_user.role == "agronomist" and current_user.district:
-        query = query.filter(Farm.location == current_user.district)
+        query = query.filter(Farm.location.ilike(f"{current_user.district}%"))
         
     return query.all()
 

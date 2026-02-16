@@ -14,15 +14,15 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.farm import Farm
-from app.core.auth import get_current_active_user, check_farm_access, require_any_authenticated
+from app.core.auth import get_current_active_user, check_farm_access, require_any_authenticated, require_farmer_or_above
 from app.models.user import User as UserModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Temporary upload directory
-UPLOAD_DIR = Path(os.environ.get('UPLOAD_DIR', '/tmp/uploads'))
+# Persistent upload directory for classification images
+UPLOAD_DIR = Path(os.environ.get('UPLOAD_DIR', '/app/data/uploads'))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -36,6 +36,7 @@ class DiseaseClassifyRequest(BaseModel):
 
 class DiseaseClassifyResponse(BaseModel):
     """Response from disease classification"""
+    id: Optional[int] = None
     plant: str
     disease: str
     confidence: float
@@ -45,6 +46,7 @@ class DiseaseClassifyResponse(BaseModel):
     crop_type: str
     gradcam_base64: Optional[str] = None
     model_type: Optional[str] = None  # "per_crop" or "general_80class"
+    image_url: Optional[str] = None
 
 
 class RiskAssessmentRequest(BaseModel):
@@ -180,20 +182,34 @@ async def classify_disease(
     file: UploadFile = File(...),
     crop_type: Optional[str] = Query(
         default=None,
-        description="Crop type. If a per-crop model exists (tomato, coffee, pepper, potato), "
-                    "uses the specialized model. Otherwise falls back to the general 80-class model."
+        description="Crop type. If a per-crop model exists (tomato, coffee, pepper, potato, cassava), "
+                    "uses the specialized model. Otherwise falls back to the general 85-class model."
     ),
-    current_user: UserModel = Depends(require_any_authenticated),
+    farm_id: Optional[int] = Query(default=None, description="Optional farm to link this classification to"),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
 ):
     """
     Classify plant disease from uploaded leaf image.
 
-    When crop_type matches a Rwanda priority crop (tomato, coffee, pepper, potato)
-    and its per-crop model is trained, uses the specialized model for higher accuracy.
-    Otherwise falls back to the general 80-class model.
+    Results are saved to the database for history tracking.
+    Images are stored persistently and accessible via /uploads/.
+    Requires farmer, agronomist, or admin role. Viewers are read-only.
     """
-    # Save uploaded file
-    file_path = UPLOAD_DIR / f"disease_{datetime.utcnow().timestamp()}_{file.filename}"
+    from app.models.data import DiseaseClassification
+
+    # Validate farm access if farm_id provided
+    if farm_id is not None:
+        farm = db.query(Farm).filter(Farm.id == farm_id).first()
+        if not farm:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        check_farm_access(farm, current_user)
+
+    # Save uploaded file persistently
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    safe_name = file.filename.replace(" ", "_") if file.filename else "upload.jpg"
+    filename = f"disease_{ts}_{safe_name}"
+    file_path = UPLOAD_DIR / filename
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -217,13 +233,36 @@ async def classify_disease(
                 else:
                     logger.info(f"Per-crop model for {crop_type} not available, falling back to general")
 
-        # Fallback to general 80-class model
+        # Fallback to general 85-class model
         if result is None:
             from app.ml import DiseaseClassifier
             classifier = DiseaseClassifier(crop_type=crop_type)
             result = classifier.predict_with_gradcam(str(file_path))
 
+        # Save classification to database
+        image_url = f"/uploads/{filename}"
+        record = DiseaseClassification(
+            user_id=current_user.id,
+            farm_id=farm_id,
+            image_path=image_url,
+            original_filename=file.filename,
+            plant=result.get('plant', 'Unknown'),
+            disease=result['disease'],
+            confidence=result['confidence'],
+            is_healthy=result.get('is_healthy'),
+            crop_type=result.get('crop_type', crop_type or 'unknown'),
+            model_type=model_type_used,
+            top5=result.get('top5', []),
+            treatment=result.get('treatment', {}),
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+
+        logger.info(f"Classification saved: id={record.id}, disease={record.disease}, confidence={record.confidence}")
+
         return DiseaseClassifyResponse(
+            id=record.id,
             plant=result.get('plant', 'Unknown'),
             disease=result['disease'],
             confidence=result['confidence'],
@@ -233,13 +272,135 @@ async def classify_disease(
             crop_type=result.get('crop_type', crop_type or 'unknown'),
             gradcam_base64=result.get('gradcam_base64'),
             model_type=model_type_used,
+            image_url=image_url,
         )
 
     except Exception as e:
         logger.error(f"Disease classification failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
+        # Clean up image on failure
         file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/classification-history")
+async def get_classification_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    farm_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_any_authenticated),
+):
+    """
+    Get classification history scoped by role:
+    - Admin: all classifications
+    - Agronomist: own + classifications linked to farms in their district
+    - Farmer: own classifications only
+    - Viewer: own classifications only
+    """
+    from app.models.data import DiseaseClassification
+
+    query = db.query(DiseaseClassification)
+
+    # Role-based scoping
+    if current_user.role == "admin":
+        pass  # admin sees everything
+    elif current_user.role == "agronomist":
+        # Own scans + scans linked to farms in their district
+        if current_user.district:
+            district_farm_ids = [
+                f.id for f in db.query(Farm.id).filter(
+                    Farm.location.ilike(f"{current_user.district}%")
+                ).all()
+            ]
+            query = query.filter(
+                (DiseaseClassification.user_id == current_user.id) |
+                (DiseaseClassification.farm_id.in_(district_farm_ids))
+            )
+        else:
+            query = query.filter(DiseaseClassification.user_id == current_user.id)
+    else:
+        # Farmer / Viewer: own scans only
+        query = query.filter(DiseaseClassification.user_id == current_user.id)
+
+    if farm_id is not None:
+        query = query.filter(DiseaseClassification.farm_id == farm_id)
+
+    records = query.order_by(DiseaseClassification.created_at.desc()).limit(limit).all()
+
+    return {
+        "total": len(records),
+        "classifications": [
+            {
+                "id": r.id,
+                "plant": r.plant,
+                "disease": r.disease,
+                "confidence": r.confidence,
+                "is_healthy": r.is_healthy,
+                "crop_type": r.crop_type,
+                "model_type": r.model_type,
+                "image_url": r.image_path,
+                "original_filename": r.original_filename,
+                "farm_id": r.farm_id,
+                "user_id": r.user_id,
+                "top5": r.top5,
+                "treatment": r.treatment,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in records
+        ],
+    }
+
+
+@router.get("/classification-history/{classification_id}")
+async def get_classification_detail(
+    classification_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_any_authenticated),
+):
+    """
+    Get a single classification result by ID.
+    Access scoped by role (same rules as history list).
+    """
+    from app.models.data import DiseaseClassification
+
+    record = db.query(DiseaseClassification).filter(
+        DiseaseClassification.id == classification_id,
+    ).first()
+
+    if not record:
+        raise HTTPException(status_code=404, detail="Classification not found")
+
+    # Role-based access check
+    if current_user.role == "admin":
+        pass  # admin can view any
+    elif current_user.role == "agronomist":
+        # Can view own or linked to farms in their district
+        allowed = record.user_id == current_user.id
+        if not allowed and record.farm_id and current_user.district:
+            farm = db.query(Farm).filter(Farm.id == record.farm_id).first()
+            if farm and farm.location and farm.location.startswith(current_user.district):
+                allowed = True
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Access denied")
+    else:
+        # Farmer / Viewer: own only
+        if record.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "id": record.id,
+        "plant": record.plant,
+        "disease": record.disease,
+        "confidence": record.confidence,
+        "is_healthy": record.is_healthy,
+        "crop_type": record.crop_type,
+        "model_type": record.model_type,
+        "image_url": record.image_path,
+        "original_filename": record.original_filename,
+        "farm_id": record.farm_id,
+        "top5": record.top5,
+        "treatment": record.treatment,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
 
 
 @router.get("/supported-diseases")

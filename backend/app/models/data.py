@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, JSON, ForeignKey, text
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
@@ -65,8 +65,38 @@ class VegetationHealth(Base):
     stress_level = Column(String(20), nullable=True)  # 'none', 'low', 'moderate', 'high', 'severe'
     stress_type = Column(String(50), nullable=True)  # 'drought', 'heat', 'water', 'nutrient', 'multiple'
     
-    created_at = Column(DateTime, server_default='now()', nullable=False)
-    
+    created_at = Column(DateTime, server_default=text('now()'), nullable=False)
+
     # Relationship
     farm = relationship("Farm", back_populates="vegetation_health")
 
+
+class DiseaseClassification(Base):
+    """Persisted disease classification results from leaf image uploads."""
+    __tablename__ = "disease_classifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    farm_id = Column(Integer, ForeignKey("farms.id", ondelete="SET NULL"), nullable=True)
+
+    # Image
+    image_path = Column(String, nullable=True)
+    original_filename = Column(String(255), nullable=True)
+
+    # Classification result
+    plant = Column(String(100), nullable=False)
+    disease = Column(String(100), nullable=False)
+    confidence = Column(Float, nullable=False)
+    is_healthy = Column(Boolean, nullable=True)
+    crop_type = Column(String(50), nullable=True)
+    model_type = Column(String(50), nullable=True)  # "per_crop" or "general_80class"
+
+    # Detailed results
+    top5 = Column(JSON, nullable=True)
+    treatment = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, server_default=text('now()'), nullable=False)
+
+    # Relationships
+    user = relationship("User", backref="classifications")
+    farm = relationship("Farm", backref="classifications")

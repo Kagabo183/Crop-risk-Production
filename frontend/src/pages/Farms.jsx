@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
-import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, Camera, X, Check, Navigation } from 'lucide-react'
-import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, classifyDisease } from '../api'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite } from 'lucide-react'
+import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus } from '../api'
 import { useAuth } from '../context/AuthContext'
 import LOCATIONS from '../data/locations.json'
 
@@ -22,11 +22,9 @@ export default function Farms() {
   const [editingId, setEditingId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Leaf scan state
-  const [scanFarmId, setScanFarmId] = useState(null)
-  const [scanResult, setScanResult] = useState({})
-  const [scanning, setScanning] = useState({})
-  const fileInputRef = useRef(null)
+  // Satellite fetch progress: { [farmId]: { percent, stage, taskId } }
+  const [satProgress, setSatProgress] = useState({})
+  const pollTimers = useRef({})
 
   // GPS state
   const [geoLoading, setGeoLoading] = useState(false)
@@ -131,46 +129,63 @@ export default function Farms() {
     )
   }
 
-  const handleScanClick = (farmId) => {
-    setScanFarmId(farmId)
-    fileInputRef.current?.click()
-  }
+  const pollTaskProgress = useCallback((farmId, taskId) => {
+    const poll = async () => {
+      try {
+        const res = await getTaskStatus(taskId)
+        const { state, percent, stage } = res.data
+        setSatProgress(prev => ({ ...prev, [farmId]: { percent, stage, taskId } }))
 
-  const handleFileSelect = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file || !scanFarmId) return
-    e.target.value = ''
-
-    const farm = farms.find(f => f.id === scanFarmId)
-    const cropType = farm?.crop_type?.split(',')[0]?.trim() || undefined
-
-    setScanning(prev => ({ ...prev, [scanFarmId]: true }))
-    try {
-      const res = await classifyDisease(file, cropType)
-      setScanResult(prev => ({ ...prev, [scanFarmId]: res.data }))
-    } catch (err) {
-      setScanResult(prev => ({
-        ...prev,
-        [scanFarmId]: { error: err.response?.data?.detail || 'Classification failed' },
-      }))
+        if (state === 'SUCCESS' || state === 'FAILURE') {
+          clearInterval(pollTimers.current[farmId])
+          delete pollTimers.current[farmId]
+          if (state === 'SUCCESS') {
+            loadData()
+            // Clear progress after showing 100% briefly
+            setTimeout(() => setSatProgress(prev => {
+              const next = { ...prev }
+              delete next[farmId]
+              return next
+            }), 2000)
+          } else {
+            setSatProgress(prev => ({ ...prev, [farmId]: { percent: 0, stage: 'Failed' } }))
+          }
+        }
+      } catch {
+        // If polling fails, keep trying
+      }
     }
-    setScanning(prev => ({ ...prev, [scanFarmId]: false }))
-    setScanFarmId(null)
+    pollTimers.current[farmId] = setInterval(poll, 1500)
+    poll() // immediate first check
+  }, [])
+
+  const handleFetchSatellite = async (farmId) => {
+    setSatProgress(prev => ({ ...prev, [farmId]: { percent: 5, stage: 'Starting...' } }))
+    try {
+      const res = await triggerSatelliteDownload(farmId, 30)
+      const taskId = res.data.task_id
+      pollTaskProgress(farmId, taskId)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to fetch satellite data')
+      setSatProgress(prev => {
+        const next = { ...prev }
+        delete next[farmId]
+        return next
+      })
+    }
   }
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollTimers.current).forEach(clearInterval)
+    }
+  }, [])
 
   if (loading) return <div className="loading"><div className="spinner" /><p>Loading farms...</p></div>
 
   return (
     <>
-      {/* Hidden file input for leaf scan */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        style={{ display: 'none' }}
-        accept="image/*"
-        onChange={handleFileSelect}
-      />
-
       {/* Stats */}
       <div className="stats-grid">
         <div className="stat-card">
@@ -379,9 +394,14 @@ export default function Farms() {
         {farms.map(farm => {
           const sat = satellite.find(s => s.id === farm.id)
           const ndvi = sat?.ndvi
+          const ndre = sat?.ndre
+          const ndwi = sat?.ndwi
+          const evi = sat?.evi
+          const savi = sat?.savi
+          const hasIndices = ndvi != null || ndre != null || ndwi != null || evi != null || savi != null
+          const hasCoords = farm.latitude && farm.longitude
           const ndviStatus = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'high'
-          const result = scanResult[farm.id]
-          const isScanning = scanning[farm.id]
+          const progress = satProgress[farm.id]
 
           return (
             <div key={farm.id} className="card">
@@ -423,10 +443,6 @@ export default function Farms() {
                     <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Size</span>
                     <div style={{ fontWeight: 500 }}>{farm.size_hectares || farm.area || '—'} ha</div>
                   </div>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>NDVI</span>
-                    <div style={{ fontWeight: 500 }}>{ndvi != null ? ndvi.toFixed(3) : '—'}</div>
-                  </div>
                   {farm.latitude && (
                     <div>
                       <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Coordinates</span>
@@ -441,67 +457,99 @@ export default function Farms() {
                       <div style={{ fontWeight: 500 }}>{sat.ndvi_date}</div>
                     </div>
                   )}
+                  {sat?.data_source && (
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Source</span>
+                      <div style={{ fontWeight: 500 }}>{sat.data_source}</div>
+                    </div>
+                  )}
                 </div>
 
-                {/* NDVI Bar */}
-                {ndvi != null && (
+                {/* Vegetation Indices */}
+                {hasIndices ? (
                   <div style={{ marginTop: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>NDVI</span>
-                      <span style={{ fontWeight: 600 }}>{ndvi.toFixed(3)}</span>
-                    </div>
-                    <div className="confidence-bar">
-                      <div
-                        className="confidence-fill"
-                        style={{
-                          width: `${ndvi * 100}%`,
-                          background: ndvi >= 0.6 ? 'var(--success)' : ndvi >= 0.4 ? 'var(--warning)' : 'var(--danger)',
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Scan Leaf Button */}
-                <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button
-                    className="btn btn-primary"
-                    style={{ fontSize: 13, padding: '6px 12px' }}
-                    onClick={() => handleScanClick(farm.id)}
-                    disabled={isScanning}
-                  >
-                    <Camera size={14} />
-                    {isScanning ? 'Scanning...' : 'Scan Leaf'}
-                  </button>
-                </div>
-
-                {/* Scan Result */}
-                {result && !result.error && (
-                  <div style={{
-                    marginTop: 12, padding: 12, borderRadius: 8,
-                    background: 'var(--success-light, #f0fdf4)', border: '1px solid var(--success, #16a34a)',
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                      {result.predicted_disease || result.disease || 'Unknown'}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      Confidence: {((result.confidence || 0) * 100).toFixed(1)}%
-                      {result.crop && <> | Crop: {result.crop}</>}
-                    </div>
-                    {result.is_healthy && (
-                      <div style={{ fontSize: 12, color: 'var(--success)', fontWeight: 500, marginTop: 4 }}>
-                        Plant appears healthy
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Vegetation Indices</div>
+                    {[
+                      { label: 'NDVI', value: ndvi, desc: 'Vegetation health' },
+                      { label: 'NDRE', value: ndre, desc: 'Chlorophyll content' },
+                      { label: 'NDWI', value: ndwi, desc: 'Water stress' },
+                      { label: 'EVI', value: evi, desc: 'Canopy structure' },
+                      { label: 'SAVI', value: savi, desc: 'Soil-adjusted veg.' },
+                    ].filter(idx => idx.value != null).map(idx => (
+                      <div key={idx.label} style={{ marginBottom: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
+                          <span style={{ color: 'var(--text-secondary)' }} title={idx.desc}>{idx.label}</span>
+                          <span style={{ fontWeight: 600 }}>{idx.value.toFixed(3)}</span>
+                        </div>
+                        <div className="confidence-bar" style={{ height: 6 }}>
+                          <div
+                            className="confidence-fill"
+                            style={{
+                              width: `${Math.min(Math.max(idx.value, 0), 1) * 100}%`,
+                              background: idx.value >= 0.6 ? 'var(--success)' : idx.value >= 0.4 ? 'var(--warning)' : 'var(--danger)',
+                            }}
+                          />
+                        </div>
                       </div>
-                    )}
+                    ))}
+                  </div>
+                ) : !progress && (
+                  <div style={{
+                    marginTop: 16, padding: 12, borderRadius: 8,
+                    background: hasCoords ? '#dbeafe20' : '#fef3c720',
+                    border: `1px solid ${hasCoords ? '#3b82f640' : '#d9770640'}`,
+                    textAlign: 'center',
+                  }}>
+                    <Satellite size={20} style={{ color: 'var(--text-secondary)', marginBottom: 4 }} />
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                      {hasCoords
+                        ? 'No satellite data yet'
+                        : 'Add coordinates to enable satellite monitoring'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                      {hasCoords
+                        ? 'Click "Fetch Satellite Data" below to download imagery'
+                        : 'Use "Edit" to add latitude/longitude or GPS location'}
+                    </div>
                   </div>
                 )}
-                {result?.error && (
-                  <div style={{
-                    marginTop: 12, padding: 12, borderRadius: 8,
-                    background: '#fef2f2', border: '1px solid var(--danger)',
-                    fontSize: 13, color: 'var(--danger)',
-                  }}>
-                    {result.error}
+
+                {/* Satellite Fetch Progress / Button */}
+                {hasCoords && (
+                  <div style={{ marginTop: 16 }}>
+                    {progress ? (
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>
+                            <Satellite size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                            {progress.stage}
+                          </span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>
+                            {progress.percent}%
+                          </span>
+                        </div>
+                        <div style={{
+                          height: 8, borderRadius: 4, background: 'var(--bg-secondary, #f1f5f9)',
+                          overflow: 'hidden',
+                        }}>
+                          <div style={{
+                            height: '100%', borderRadius: 4,
+                            width: `${progress.percent}%`,
+                            background: progress.percent >= 100 ? 'var(--success)' : 'var(--primary)',
+                            transition: 'width 0.5s ease',
+                          }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 13, padding: '6px 12px' }}
+                        onClick={() => handleFetchSatellite(farm.id)}
+                      >
+                        <Satellite size={14} />
+                        Fetch Satellite Data
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

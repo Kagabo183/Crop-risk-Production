@@ -219,7 +219,9 @@ export default function Dashboard() {
                 {farms.map(farm => {
                   const sat = satellite.find(s => s.id === farm.id)
                   const ndvi = sat?.ndvi
-                  const status = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'high'
+                  // NDVI interpretation: >=0.6 healthy, 0.4-0.6 moderate, <0.4 stressed
+                  const status = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'stressed'
+                  const displayStatus = status === 'unknown' ? 'No data' : status === 'stressed' ? 'Stressed' : status.charAt(0).toUpperCase() + status.slice(1)
                   return (
                     <tr key={farm.id}>
                       <td><strong>{farm.name}</strong></td>
@@ -228,7 +230,7 @@ export default function Dashboard() {
                       <td>{farm.size_hectares || farm.area || '—'}</td>
                       <td>{ndvi != null ? ndvi.toFixed(3) : '—'}</td>
                       <td><span className={`badge ${status}`}>
-                        {status === 'unknown' ? 'No data' : status}
+                        {displayStatus}
                       </span></td>
                     </tr>
                   )

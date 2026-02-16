@@ -139,15 +139,23 @@ def detect_stress_zones():
                         level_map = {'severe': 'critical', 'high': 'high', 'moderate': 'medium'}
                         stress_level = assessment.get('stress_level', 'high')
                         # Map to alert levels, default to high since score >= 60
-                        alert_level = level_map.get(stress_level, 'high') 
-                        
+                        alert_level = level_map.get(stress_level, 'high')
+
                         primary = assessment.get('primary_stress', 'General')
                         message = assessment.get('message', f"High {primary} stress detected. Score: {assessment['stress_score']}")
+
+                        # Action days based on stress severity
+                        action_days_map = {'severe': (1, 3), 'high': (2, 5), 'moderate': (5, 10)}
+                        action_days = action_days_map.get(stress_level, (5, 10))
 
                         new_alert = Alert(
                             farm_id=farm.id,
                             message=message,
-                            level=alert_level
+                            level=alert_level,
+                            alert_type='vegetation_stress',
+                            source='satellite',
+                            action_days_min=action_days[0],
+                            action_days_max=action_days[1],
                         )
                         db.add(new_alert)
                         db.commit()
@@ -190,51 +198,80 @@ def generate_risk_heatmaps():
         db.close()
 
 
-@shared_task(name="satellite.process_single_farm")
-def process_single_farm(farm_id: int, days_back: int = 30):
+@shared_task(name="satellite.process_single_farm", bind=True)
+def process_single_farm(self, farm_id: int, days_back: int = 30):
     """
-    Process satellite data for a single farm (on-demand)
-    
-    Args:
-        farm_id: Farm ID to process
-        days_back: Number of days to look back for imagery
+    Process satellite data for a single farm (on-demand).
+    Reports progress via Celery state updates.
     """
     db = SessionLocal()
     try:
+        # Stage 1: Initializing
+        self.update_state(state='PROGRESS', meta={
+            'percent': 10, 'stage': 'Connecting to satellite API...',
+            'farm_id': farm_id,
+        })
+
         satellite_service = SatelliteDataService()
         stress_service = StressDetectionService()
-        
-        # Fetch and process imagery
+
+        # Stage 2: Fetching imagery
+        self.update_state(state='PROGRESS', meta={
+            'percent': 30, 'stage': 'Fetching satellite imagery...',
+            'farm_id': farm_id,
+        })
+
         images = satellite_service.process_farm_imagery(
             db=db,
             farm_id=farm_id,
             days_back=days_back
         )
-        
-        # Detect stress
+
         if images:
+            # Stage 3: Calculating indices
+            self.update_state(state='PROGRESS', meta={
+                'percent': 60,
+                'stage': f'Calculating vegetation indices ({len(images)} images)...',
+                'farm_id': farm_id,
+            })
+
+            # Stage 4: Stress detection
+            self.update_state(state='PROGRESS', meta={
+                'percent': 80, 'stage': 'Running stress detection...',
+                'farm_id': farm_id,
+            })
+
             assessment = stress_service.calculate_composite_health_score(db, farm_id)
-            
-            # Update vegetation health
+
+            # Stage 5: Saving
+            self.update_state(state='PROGRESS', meta={
+                'percent': 90, 'stage': 'Saving health records...',
+                'farm_id': farm_id,
+            })
+
+            # Use the latest image date for vegetation health record
+            latest_image_date = max(img.date for img in images)
             stress_service.update_vegetation_health_record(
                 db=db,
                 farm_id=farm_id,
-                date=datetime.now().date()
+                date=latest_image_date
             )
-            
+
             return {
+                'percent': 100, 'stage': 'Complete',
                 'farm_id': farm_id,
                 'images_processed': len(images),
                 'health_score': assessment['health_score'],
-                'stress_level': assessment['stress_level']
+                'stress_level': assessment['stress_level'],
             }
         else:
             return {
+                'percent': 100, 'stage': 'Complete',
                 'farm_id': farm_id,
                 'images_processed': 0,
-                'message': 'No imagery found'
+                'message': 'No imagery found',
             }
-        
+
     except Exception as e:
         logger.error(f"Error processing farm {farm_id}: {e}")
         raise

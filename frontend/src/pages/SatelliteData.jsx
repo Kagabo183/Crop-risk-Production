@@ -74,7 +74,10 @@ export default function SatelliteData() {
       if (selectedFarm) {
         getNdviHistory(selectedFarm, 200, startDate, endDate)
           .then(r => setHistory(r.data || []))
-          .catch(() => { })
+          .catch(err => {
+            console.warn('Failed to refresh NDVI history:', err)
+            // Don't set error here, main data fetch succeeded
+          })
       }
     } catch (e) {
       setError(e.response?.data?.detail || 'Pipeline data fetch failed')
@@ -100,10 +103,17 @@ export default function SatelliteData() {
             if (selectedFarm) {
               getNdviHistory(selectedFarm, 200, startDate, endDate)
                 .then(r => setHistory(r.data || []))
-                .catch(() => { })
+                .catch(err => {
+                  console.warn('Failed to refresh NDVI history:', err)
+                })
             }
           }
-        } catch { clearInterval(poll); setSeeding(false) }
+        } catch (err) {
+          console.error('Poll failed:', err)
+          clearInterval(poll)
+          setSeeding(false)
+          setError('Failed to check fetch status. Data may still be processing.')
+        }
       }, 3000)
     } catch (e) {
       setError(e.response?.data?.detail || 'Real data fetch failed')
