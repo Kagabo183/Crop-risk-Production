@@ -6,6 +6,30 @@ An intelligent crop monitoring system that combines satellite imagery, weather d
 
 ---
 
+## What's New in v2.6.0 🎉
+
+### Real Satellite Data Integration ✅
+- **Enabled Google Earth Engine** for authentic Sentinel-2 satellite data processing
+- **Removed all simulated data** - 100% real vegetation indices (NDVI, NDRE, NDWI, EVI, SAVI)
+- **Identical coordinates = identical values** - farms at the same location now show consistent measurements
+- Fixed GEE initialization with OAuth authentication support
+
+### Frontend Improvements 🎨
+- **Display all 5 vegetation indices** on Farms page (previously only showed NDVI)
+- **Beautiful stress monitoring cards** with color-coded metrics (replaced debug JSON dumps)
+- **Fixed error handling** - proper error messages instead of silent failures
+- **Improved UX** - better visual distinction for farms with/without satellite data
+
+### Bug Fixes 🐛
+- Fixed critical error detection logic (`.some()` instead of `.every()`)
+- Fixed NDVI status display ("stressed" instead of confusing "high" status)
+- Fixed broken conditional styling in farm cards
+- Added comprehensive error logging for debugging
+
+[See full changelog](#changelog)
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -49,13 +73,15 @@ The Crop Risk Prediction Platform provides:
 
 ## Key Features
 
-### Satellite Monitoring
+### Satellite Monitoring (Real Data via Google Earth Engine)
 | Feature | Description |
 |---------|-------------|
+| **Real satellite data** | ✅ Authentic Sentinel-2 imagery via Google Earth Engine (no simulated data) |
 | Multi-source imagery | Sentinel-2, Landsat-8/9 via Google Earth Engine |
-| Vegetation indices | NDVI, NDRE, NDWI, EVI, SAVI |
+| Vegetation indices | **All 5 indices**: NDVI, NDRE, NDWI, EVI, SAVI calculated from real pixels |
 | Cloud filtering | Automatic filtering of cloudy images (<20%) |
 | Historical analysis | 90-day trend tracking |
+| Data consistency | Farms with identical coordinates show identical values (proof of real data) |
 
 ### Disease Prediction
 | Disease | Model | Accuracy | Crops |
@@ -1062,12 +1088,48 @@ For issues and feature requests, please open an issue on GitHub.
 
 ---
 
+## Changelog
+
+### v2.6.0 (February 16, 2026)
+
+**Major Features:**
+- ✅ Enabled real Google Earth Engine satellite data processing
+- ✅ All 5 vegetation indices (NDVI, NDRE, NDWI, EVI, SAVI) calculated from real pixels
+- ✅ Removed all simulated/random data from database
+- ✅ Beautiful stress monitoring cards with formatted metrics
+- 🐛 Fixed critical frontend error handling bugs
+- 🎨 Improved UX across all pages
+
+**Technical Improvements:**
+- Fixed GEE initialization with OAuth authentication
+- Import settings singleton correctly in satellite service
+- Added GEE_PROJECT environment variable support
+- Improved error logging and user feedback
+- Database cleanup to remove duplicate/simulated images
+
+**Bug Fixes:**
+- Fixed error detection logic (changed `.every()` to `.some()`)
+- Fixed NDVI status mapping ("stressed" instead of "high")
+- Fixed silent error handling in multiple components
+- Fixed broken conditional styling in Farms page
+
+[Full commit history on GitHub](https://github.com/Kagabo183/Crop-Prediction-Staging/commits/main)
+
+### v2.5.0 (February 15, 2026)
+- Potato disease classification model (99.7% accuracy)
+- Fixed Grad-CAM visualization
+- Per-crop disease classification system
+- Cassava disease model integration
+- Complete platform rebuild with Vite frontend
+
+---
+
 ## License
 
 MIT License - see LICENSE file for details.
 
 ---
 
-**Version**: 2.5.0
-**Last Updated**: February 2026
+**Version**: 2.6.0
+**Last Updated**: February 16, 2026
 **Maintainer**: Crop Risk Platform Team
