@@ -211,3 +211,129 @@ def delete_farm(
     db.delete(db_farm)
     db.commit()
     return {"status": "deleted", "farm_id": farm_id}
+
+
+@router.post("/{farm_id}/auto-detect-boundary")
+def auto_detect_farm_boundary(
+    farm_id: int,
+    buffer_meters: int = 200,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Automatically detect farm boundary from satellite imagery using Dynamic World land cover.
+
+    This uses Google's Dynamic World dataset to identify crop areas and exclude forests/buildings.
+
+    Args:
+        farm_id: Farm ID
+        buffer_meters: Search radius around farm center point (default 200m)
+
+    Returns:
+        Detected boundary as GeoJSON polygon with area and confidence
+    """
+    from app.services.satellite_service import SatelliteDataService
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import shape
+    import json
+
+    # Get farm
+    db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
+    if not db_farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+
+    # Check permissions
+    if current_user.role == "farmer" and db_farm.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your farm")
+
+    # Check if farm has coordinates
+    if not db_farm.latitude or not db_farm.longitude:
+        raise HTTPException(
+            status_code=400,
+            detail="Farm must have coordinates (latitude/longitude) to auto-detect boundary"
+        )
+
+    # Extract boundary using Dynamic World
+    satellite_service = SatelliteDataService()
+    result = satellite_service.extract_farm_boundary(
+        lat=db_farm.latitude,
+        lon=db_farm.longitude,
+        buffer_meters=buffer_meters
+    )
+
+    if not result['success']:
+        raise HTTPException(
+            status_code=404,
+            detail=result.get('error', 'Failed to detect farm boundary')
+        )
+
+    # Optionally save to database (for now just return it)
+    # User can review and confirm before saving
+    return {
+        "success": True,
+        "farm_id": farm_id,
+        "boundary": result['boundary'],  # GeoJSON polygon
+        "area_ha": result['area_ha'],
+        "confidence": result['confidence'],
+        "land_cover": result['land_cover'],
+        "message": f"Farm boundary detected: {result['area_ha']:.2f} hectares (confidence: {result['confidence']:.0%})"
+    }
+
+
+@router.post("/{farm_id}/save-boundary")
+def save_farm_boundary(
+    farm_id: int,
+    boundary_geojson: dict,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Save a farm boundary polygon (from auto-detection or manual drawing).
+
+    Args:
+        farm_id: Farm ID
+        boundary_geojson: GeoJSON polygon geometry
+
+    Returns:
+        Updated farm with boundary
+    """
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import shape
+    import json
+
+    # Get farm
+    db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
+    if not db_farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+
+    # Check permissions
+    if current_user.role == "farmer" and db_farm.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your farm")
+
+    try:
+        # Convert GeoJSON to Shapely geometry
+        shapely_geom = shape(boundary_geojson)
+
+        # Convert to GeoAlchemy2 geometry (WKT format with SRID)
+        db_farm.boundary = from_shape(shapely_geom, srid=4326)
+
+        # Update area based on boundary
+        area_m2 = shapely_geom.area * 111320 * 111320  # Rough conversion from degrees to m²
+        db_farm.area = area_m2 / 10000  # Convert to hectares
+
+        db.commit()
+        db.refresh(db_farm)
+
+        return {
+            "success": True,
+            "farm_id": farm_id,
+            "area_ha": db_farm.area,
+            "message": f"Boundary saved successfully ({db_farm.area:.2f} hectares)"
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to save boundary: {str(e)}"
+        )

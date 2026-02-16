@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite } from 'lucide-react'
-import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus } from '../api'
+import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan } from 'lucide-react'
+import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary } from '../api'
 import { useAuth } from '../context/AuthContext'
 import LOCATIONS from '../data/locations.json'
 
@@ -29,6 +29,11 @@ export default function Farms() {
   // GPS state
   const [geoLoading, setGeoLoading] = useState(false)
   const [geoError, setGeoError] = useState(null)
+
+  // Boundary detection state
+  const [boundaryLoading, setBoundaryLoading] = useState(false)
+  const [boundaryResult, setBoundaryResult] = useState(null)
+  const [boundaryError, setBoundaryError] = useState(null)
 
   const loadData = () => {
     setLoading(true)
@@ -127,6 +132,46 @@ export default function Farms() {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
+  }
+
+  const handleAutoDetectBoundary = async () => {
+    if (!formData.latitude || !formData.longitude) {
+      setBoundaryError('Please set farm coordinates first (use GPS or enter manually)')
+      return
+    }
+
+    setBoundaryLoading(true)
+    setBoundaryError(null)
+    setBoundaryResult(null)
+
+    try {
+      // For new farms, we need to save first to get an ID
+      if (!editingId) {
+        setBoundaryError('Please save the farm first, then use Auto-Detect Boundary')
+        setBoundaryLoading(false)
+        return
+      }
+
+      const response = await autoDetectBoundary(editingId, 200)
+
+      if (response.data.success) {
+        setBoundaryResult(response.data)
+
+        // Auto-save the detected boundary
+        await saveFarmBoundary(editingId, response.data.boundary)
+
+        // Update area in form
+        setFormData(prev => ({
+          ...prev,
+          area: response.data.area_ha.toFixed(2)
+        }))
+
+        setBoundaryLoading(false)
+      }
+    } catch (err) {
+      setBoundaryError(err.response?.data?.detail || 'Failed to detect boundary. The farm may be in a forest or non-crop area.')
+      setBoundaryLoading(false)
+    }
   }
 
   const pollTaskProgress = useCallback((farmId, taskId) => {
@@ -349,8 +394,8 @@ export default function Farms() {
                   />
                 </div>
               </div>
-              {/* GPS Button */}
-              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* GPS & Boundary Detection Buttons */}
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <button
                   className="btn btn-secondary"
                   type="button"
@@ -361,15 +406,53 @@ export default function Farms() {
                   <Navigation size={14} />
                   {geoLoading ? 'Getting location...' : '📍 Use My Location'}
                 </button>
+                {editingId && formData.latitude && formData.longitude && (
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={handleAutoDetectBoundary}
+                    disabled={boundaryLoading}
+                    style={{ fontSize: 13, padding: '6px 14px', background: 'var(--primary)', color: 'white' }}
+                    title="Automatically detect farm boundary from satellite imagery (excludes forests)"
+                  >
+                    <Scan size={14} />
+                    {boundaryLoading ? 'Detecting...' : '🛰️ Auto-Detect Boundary'}
+                  </button>
+                )}
                 {formData.latitude && formData.longitude && (
                   <span style={{ fontSize: 12, color: 'var(--success)', fontWeight: 500 }}>
-                    ✓ Coordinates set: {formData.latitude}, {formData.longitude}
+                    ✓ Coordinates: {formData.latitude}, {formData.longitude}
                   </span>
                 )}
                 {geoError && (
                   <span style={{ fontSize: 12, color: 'var(--danger)' }}>{geoError}</span>
                 )}
               </div>
+              {/* Boundary Detection Results */}
+              {boundaryResult && (
+                <div style={{ marginTop: 12, padding: 12, background: '#f0fdf4', border: '1px solid #22c55e', borderRadius: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', marginBottom: 4 }}>
+                    ✅ Farm Boundary Detected & Saved!
+                  </div>
+                  <div style={{ fontSize: 12, color: '#15803d' }}>
+                    • Area: {boundaryResult.area_ha} hectares
+                  </div>
+                  <div style={{ fontSize: 12, color: '#15803d' }}>
+                    • Confidence: {(boundaryResult.confidence * 100).toFixed(0)}%
+                  </div>
+                  <div style={{ fontSize: 12, color: '#15803d' }}>
+                    • Crop area: {(boundaryResult.land_cover.crops * 100).toFixed(0)}% | Forest: {(boundaryResult.land_cover.trees * 100).toFixed(0)}%
+                  </div>
+                  <div style={{ fontSize: 11, color: '#166534', marginTop: 4 }}>
+                    ℹ️ Boundary excludes forests and buildings. Satellite data will now use the exact farm area.
+                  </div>
+                </div>
+              )}
+              {boundaryError && (
+                <div style={{ marginTop: 12, padding: 10, background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, fontSize: 12, color: '#92400e' }}>
+                  ⚠️ {boundaryError}
+                </div>
+              )}
               <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
                 <button className="btn btn-primary" type="submit" disabled={submitting}>
                   <Check size={16} />

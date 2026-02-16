@@ -519,3 +519,126 @@ class SatelliteDataService:
             raise
 
         return processed_images
+
+    def extract_farm_boundary(
+        self,
+        lat: float,
+        lon: float,
+        buffer_meters: float = 200,
+        days_back: int = 30
+    ) -> Dict:
+        """
+        Automatically detect farm boundary from Dynamic World land cover classification
+
+        Uses Google's Dynamic World dataset to identify crop areas and exclude forests.
+
+        Args:
+            lat: Farm latitude
+            lon: Farm longitude
+            buffer_meters: Search radius around point (default 200m)
+            days_back: How many days back to search for classification data
+
+        Returns:
+            Dictionary with:
+            - boundary: GeoJSON polygon of detected farm boundary
+            - area_ha: Area in hectares
+            - confidence: Classification confidence (0-1)
+            - land_cover: Breakdown of land cover types
+            - success: Boolean indicating if boundary was found
+        """
+        if not self.gee_initialized:
+            logger.error("GEE not initialized - cannot extract farm boundary")
+            return {
+                'success': False,
+                'error': 'Google Earth Engine not initialized',
+                'boundary': None
+            }
+
+        try:
+            import json
+            from datetime import datetime, timedelta
+
+            logger.info(f"🔍 Auto-detecting farm boundary at ({lat}, {lon})")
+
+            point = ee.Geometry.Point([lon, lat])
+            search_area = point.buffer(buffer_meters)
+
+            # Get Dynamic World land cover classification
+            # Class 4 = Crops, Class 1 = Trees (forests)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days_back)
+
+            dw_collection = (ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+                .filterBounds(point)
+                .filterDate(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                .select(['label', 'crops', 'trees']))
+
+            # Get most common classification (mode)
+            dw_mode = dw_collection.select('label').mode()
+
+            # Also get probability layers for confidence
+            dw_mean = dw_collection.select(['crops', 'trees']).mean()
+
+            # Create mask for crops (class 4)
+            crops_mask = dw_mode.eq(4)
+
+            # Convert crop pixels to vectors (polygons)
+            crop_vectors = crops_mask.reduceToVectors(
+                geometry=search_area,
+                scale=10,  # 10m resolution
+                geometryType='polygon',
+                eightConnected=False,
+                labelProperty='crops',
+                maxPixels=1e8
+            )
+
+            # Find the polygon that contains the farm center point
+            farm_polygon = crop_vectors.filterBounds(point).first()
+
+            if farm_polygon is None:
+                logger.warning(f"⚠️ No crop area found at ({lat}, {lon}) - may be forest or other land cover")
+                return {
+                    'success': False,
+                    'error': 'No crop area detected at this location',
+                    'boundary': None
+                }
+
+            # Get the geometry as GeoJSON
+            geom_info = farm_polygon.geometry().getInfo()
+
+            # Calculate area
+            area_m2 = farm_polygon.geometry().area().getInfo()
+            area_ha = area_m2 / 10000
+
+            # Get land cover probabilities at farm center for confidence
+            probs = dw_mean.sample(point, 10).first().getInfo()
+            crop_prob = probs['properties'].get('crops', 0) if probs else 0
+            tree_prob = probs['properties'].get('trees', 0) if probs else 0
+
+            # Calculate confidence score
+            # High confidence if crops >> trees
+            confidence = crop_prob if crop_prob > tree_prob else 0.5
+
+            logger.info(f"✓ Farm boundary detected: {area_ha:.2f} ha (confidence: {confidence:.0%})")
+            logger.info(f"  Crop probability: {crop_prob:.0%}, Tree probability: {tree_prob:.0%}")
+
+            return {
+                'success': True,
+                'boundary': geom_info,  # GeoJSON polygon
+                'area_ha': round(area_ha, 2),
+                'confidence': round(confidence, 2),
+                'land_cover': {
+                    'crops': round(crop_prob, 2),
+                    'trees': round(tree_prob, 2)
+                },
+                'method': 'dynamic_world',
+                'resolution_m': 10
+            }
+
+        except Exception as e:
+            logger.error(f"Error extracting farm boundary: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'boundary': None
+            }

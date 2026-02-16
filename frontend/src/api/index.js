@@ -48,6 +48,10 @@ export const getFarms = () => api.get('/farms/')
 export const createFarm = (data) => api.post('/farms/', data)
 export const updateFarm = (id, data) => api.put(`/farms/${id}`, data)
 export const deleteFarm = (id) => api.delete(`/farms/${id}`)
+export const autoDetectBoundary = (farmId, bufferMeters = 200) =>
+  api.post(`/farms/${farmId}/auto-detect-boundary`, null, { params: { buffer_meters: bufferMeters } })
+export const saveFarmBoundary = (farmId, boundaryGeoJson) =>
+  api.post(`/farms/${farmId}/save-boundary`, { boundary_geojson: boundaryGeoJson })
 
 // ── Stress Monitoring ──
 export const getVegetationHealth = (farmId, daysBack = 90) =>
