@@ -120,8 +120,8 @@ export default function Dashboard() {
         {/* NDVI Bar Chart */}
         <div className="card">
           <div className="card-header">
-            <h3>Farm NDVI Comparison</h3>
-            <Link to="/satellite" className="btn btn-sm btn-secondary">View All</Link>
+            <h3>Vegetation Health (NDVI)</h3>
+            <Link to="/satellite" className="btn btn-sm btn-secondary">View All Indices</Link>
           </div>
           <div className="card-body">
             {ndviChart.length > 0 ? (
@@ -211,7 +211,11 @@ export default function Dashboard() {
                   <th>Location</th>
                   <th>Crop</th>
                   <th>Size (ha)</th>
-                  <th>NDVI</th>
+                  <th title="Normalized Difference Vegetation Index - Overall vegetation health">NDVI</th>
+                  <th title="Normalized Difference Red Edge - Chlorophyll content">NDRE</th>
+                  <th title="Normalized Difference Water Index - Water/moisture stress">NDWI</th>
+                  <th title="Enhanced Vegetation Index - Canopy structure">EVI</th>
+                  <th title="Soil Adjusted Vegetation Index - Vegetation with soil influence">SAVI</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -219,6 +223,10 @@ export default function Dashboard() {
                 {farms.map(farm => {
                   const sat = satellite.find(s => s.id === farm.id)
                   const ndvi = sat?.ndvi
+                  const ndre = sat?.ndre
+                  const ndwi = sat?.ndwi
+                  const evi = sat?.evi
+                  const savi = sat?.savi
                   // NDVI interpretation: >=0.6 healthy, 0.4-0.6 moderate, <0.4 stressed
                   const status = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'stressed'
                   const displayStatus = status === 'unknown' ? 'No data' : status === 'stressed' ? 'Stressed' : status.charAt(0).toUpperCase() + status.slice(1)
@@ -228,7 +236,13 @@ export default function Dashboard() {
                       <td>{farm.location || '—'}</td>
                       <td>{farm.crop_type || '—'}</td>
                       <td>{farm.size_hectares || farm.area || '—'}</td>
-                      <td>{ndvi != null ? ndvi.toFixed(3) : '—'}</td>
+                      <td style={{ fontWeight: 600, color: ndvi != null ? (ndvi >= 0.6 ? 'var(--success)' : ndvi >= 0.4 ? 'var(--warning)' : 'var(--danger)') : 'inherit' }}>
+                        {ndvi != null ? ndvi.toFixed(3) : '—'}
+                      </td>
+                      <td>{ndre != null ? ndre.toFixed(3) : '—'}</td>
+                      <td>{ndwi != null ? ndwi.toFixed(3) : '—'}</td>
+                      <td>{evi != null ? evi.toFixed(3) : '—'}</td>
+                      <td>{savi != null ? savi.toFixed(3) : '—'}</td>
                       <td><span className={`badge ${status}`}>
                         {displayStatus}
                       </span></td>
