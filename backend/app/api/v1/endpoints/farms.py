@@ -9,6 +9,12 @@ from app.models.farm import Farm as FarmModel
 from app.models.user import User as UserModel
 from app.core.auth import get_current_active_user, require_farmer_or_above
 from app.tasks.satellite_tasks import process_single_farm
+from app.utils.rwanda_boundary import (
+    validate_point_in_rwanda,
+    validate_boundary_in_rwanda,
+    detect_province_from_coordinates,
+    calculate_area_hectares
+)
 
 router = APIRouter()
 
@@ -79,6 +85,7 @@ class FarmCreate(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     planting_date: Optional[date] = None
+    boundary: Optional[dict] = Field(None, description="GeoJSON geometry (Polygon) for farm boundary")
 
 
 class FarmUpdate(BaseModel):
@@ -90,6 +97,11 @@ class FarmUpdate(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     planting_date: Optional[date] = None
+    boundary: Optional[dict] = Field(None, description="GeoJSON geometry (Polygon) for farm boundary")
+
+
+class BoundarySaveRequest(BaseModel):
+    boundary_geojson: dict = Field(..., description="GeoJSON geometry (Polygon)")
 
 
 def _farm_to_out(farm: FarmModel) -> dict:
@@ -138,7 +150,57 @@ def create_farm(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(require_farmer_or_above),
 ):
-    """Register a new farm. Auto-assigns owner_id to the current user."""
+    """
+    Register a new farm with Rwanda boundary validation.
+
+    - Auto-assigns owner_id to the current user
+    - Validates coordinates/boundary are within Rwanda
+    - Auto-detects province if not provided
+    - Auto-triggers satellite data fetch
+    """
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import shape
+
+    # Validate coordinates are in Rwanda
+    if farm.latitude and farm.longitude:
+        is_valid, error_msg = validate_point_in_rwanda(farm.latitude, farm.longitude)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Farm location must be within Rwanda. {error_msg}"
+            )
+
+        # Auto-detect province if not provided
+        if not farm.province:
+            detected_province = detect_province_from_coordinates(farm.latitude, farm.longitude)
+            if detected_province:
+                farm.province = detected_province
+
+    # Validate boundary if provided
+    boundary_wkb = None
+    if farm.boundary:
+        is_valid, error_msg = validate_boundary_in_rwanda(farm.boundary)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Farm boundary must be within Rwanda. {error_msg}"
+            )
+
+        # Convert GeoJSON to WKB for database
+        try:
+            shapely_geom = shape(farm.boundary)
+            boundary_wkb = from_shape(shapely_geom, srid=4326)
+
+            # Auto-calculate area from boundary if not provided
+            if not farm.area:
+                farm.area = calculate_area_hectares(farm.boundary)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid boundary geometry: {str(e)}"
+            )
+
+    # Create farm
     db_farm = FarmModel(
         name=farm.name,
         location=farm.location,
@@ -148,6 +210,7 @@ def create_farm(
         latitude=farm.latitude,
         longitude=farm.longitude,
         planting_date=farm.planting_date,
+        boundary=boundary_wkb,
         owner_id=current_user.id,
     )
     db.add(db_farm)
@@ -170,7 +233,10 @@ def update_farm(
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(require_farmer_or_above),
 ):
-    """Update an existing farm. Farmers can only update their own farms."""
+    """Update an existing farm with Rwanda boundary validation. Farmers can only update their own farms."""
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import shape
+
     db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
     if not db_farm:
         raise HTTPException(status_code=404, detail="Farm not found")
@@ -178,6 +244,40 @@ def update_farm(
         raise HTTPException(status_code=403, detail="Not your farm")
 
     update_data = farm.model_dump(exclude_unset=True)
+
+    # Validate coordinates if being updated
+    if 'latitude' in update_data and 'longitude' in update_data:
+        is_valid, error_msg = validate_point_in_rwanda(update_data['latitude'], update_data['longitude'])
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Farm location must be within Rwanda. {error_msg}"
+            )
+
+    # Validate and convert boundary if being updated
+    if 'boundary' in update_data and update_data['boundary']:
+        is_valid, error_msg = validate_boundary_in_rwanda(update_data['boundary'])
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Farm boundary must be within Rwanda. {error_msg}"
+            )
+
+        try:
+            # Store original GeoJSON before conversion for area calculation
+            boundary_geojson = update_data['boundary']
+            shapely_geom = shape(boundary_geojson)
+            update_data['boundary'] = from_shape(shapely_geom, srid=4326)
+
+            # Auto-update area from boundary using geodesic calculation
+            if 'area' not in update_data:
+                update_data['area'] = calculate_area_hectares(boundary_geojson)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid boundary geometry: {str(e)}"
+            )
+
     coords_changed = 'latitude' in update_data or 'longitude' in update_data
     for key, value in update_data.items():
         setattr(db_farm, key, value)
@@ -283,7 +383,7 @@ def auto_detect_farm_boundary(
 @router.post("/{farm_id}/save-boundary")
 def save_farm_boundary(
     farm_id: int,
-    boundary_geojson: dict,
+    request: BoundarySaveRequest,
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(require_farmer_or_above),
 ):
@@ -292,14 +392,13 @@ def save_farm_boundary(
 
     Args:
         farm_id: Farm ID
-        boundary_geojson: GeoJSON polygon geometry
+        request: Request body containing boundary_geojson
 
     Returns:
         Updated farm with boundary
     """
     from geoalchemy2.shape import from_shape
     from shapely.geometry import shape
-    import json
 
     # Get farm
     db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
@@ -311,15 +410,16 @@ def save_farm_boundary(
         raise HTTPException(status_code=403, detail="Not your farm")
 
     try:
+        boundary_geojson = request.boundary_geojson
+
         # Convert GeoJSON to Shapely geometry
         shapely_geom = shape(boundary_geojson)
 
         # Convert to GeoAlchemy2 geometry (WKT format with SRID)
         db_farm.boundary = from_shape(shapely_geom, srid=4326)
 
-        # Update area based on boundary
-        area_m2 = shapely_geom.area * 111320 * 111320  # Rough conversion from degrees to m²
-        db_farm.area = area_m2 / 10000  # Convert to hectares
+        # Update area using geodesic calculation (accurate on Earth's surface)
+        db_farm.area = calculate_area_hectares(boundary_geojson)
 
         db.commit()
         db.refresh(db_farm)

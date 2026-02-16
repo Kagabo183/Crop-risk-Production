@@ -260,6 +260,24 @@ export default function Farms() {
         </div>
       </div>
 
+      {/* Info Banner: Composite Health Scoring */}
+      <div style={{
+        marginBottom: 16,
+        padding: 12,
+        background: 'linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%)',
+        border: '1px solid #3b82f6',
+        borderRadius: 8,
+        fontSize: 13
+      }}>
+        <div style={{ fontWeight: 600, color: '#1e40af', marginBottom: 4 }}>
+          🎯 Comprehensive Health Assessment
+        </div>
+        <div style={{ color: '#1e3a8a' }}>
+          Farm health badges now consider <strong>all vegetation indices</strong> (NDVI, NDRE, NDWI, EVI, SAVI) for accurate assessment, not just NDVI alone.
+          {' '}<span style={{ opacity: 0.8 }}>Healthy ≥70% • Moderate 50-70% • High stress &lt;50%</span>
+        </div>
+      </div>
+
       {/* Register button */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <button
@@ -483,7 +501,59 @@ export default function Farms() {
           const savi = sat?.savi
           const hasIndices = ndvi != null || ndre != null || ndwi != null || evi != null || savi != null
           const hasCoords = farm.latitude && farm.longitude
-          const ndviStatus = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'high'
+
+          // ── Composite Health Score (All Indices) ──
+          const calculateCompositeHealth = () => {
+            if (!hasIndices) return 'unknown'
+
+            let healthScore = 0
+            let totalWeight = 0
+
+            // NDVI (30% weight) - Primary vegetation health
+            if (ndvi != null) {
+              const ndviScore = ndvi >= 0.6 ? 100 : ndvi >= 0.5 ? 70 : ndvi >= 0.4 ? 50 : ndvi >= 0.3 ? 30 : 10
+              healthScore += ndviScore * 0.30
+              totalWeight += 0.30
+            }
+
+            // NDRE (20% weight) - Chlorophyll/nitrogen status
+            if (ndre != null) {
+              const ndreScore = ndre >= 0.5 ? 100 : ndre >= 0.4 ? 70 : ndre >= 0.3 ? 50 : ndre >= 0.2 ? 30 : 10
+              healthScore += ndreScore * 0.20
+              totalWeight += 0.20
+            }
+
+            // NDWI (20% weight) - Water content
+            if (ndwi != null) {
+              const ndwiScore = ndwi >= 0.3 ? 100 : ndwi >= 0.2 ? 70 : ndwi >= 0.1 ? 50 : ndwi >= 0 ? 30 : 10
+              healthScore += ndwiScore * 0.20
+              totalWeight += 0.20
+            }
+
+            // EVI (15% weight) - Enhanced vegetation (atmospheric correction)
+            if (evi != null) {
+              const eviScore = evi >= 0.6 ? 100 : evi >= 0.4 ? 70 : evi >= 0.3 ? 50 : evi >= 0.2 ? 30 : 10
+              healthScore += eviScore * 0.15
+              totalWeight += 0.15
+            }
+
+            // SAVI (15% weight) - Soil-adjusted
+            if (savi != null) {
+              const saviScore = savi >= 0.5 ? 100 : savi >= 0.4 ? 70 : savi >= 0.3 ? 50 : savi >= 0.2 ? 30 : 10
+              healthScore += saviScore * 0.15
+              totalWeight += 0.15
+            }
+
+            // Normalize by actual total weight
+            const finalScore = totalWeight > 0 ? healthScore / totalWeight : 0
+
+            // Determine status badge
+            if (finalScore >= 70) return 'healthy'
+            if (finalScore >= 50) return 'moderate'
+            return 'high' // high stress
+          }
+
+          const healthStatus = calculateCompositeHealth()
           const progress = satProgress[farm.id]
 
           return (
@@ -491,8 +561,8 @@ export default function Farms() {
               <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3>{farm.name}</h3>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span className={`badge ${ndviStatus}`}>
-                    {ndviStatus === 'unknown' ? 'No data' : ndviStatus}
+                  <span className={`badge ${healthStatus}`}>
+                    {healthStatus === 'unknown' ? 'No data' : healthStatus}
                   </span>
                   <button
                     className="btn btn-secondary"

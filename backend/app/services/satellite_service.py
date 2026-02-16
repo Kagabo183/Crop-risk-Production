@@ -606,8 +606,9 @@ class SatelliteDataService:
             # Get the geometry as GeoJSON
             geom_info = farm_polygon.geometry().getInfo()
 
-            # Calculate area
-            area_m2 = farm_polygon.geometry().area().getInfo()
+            # Calculate area using geodesic calculation (accurate on Earth's surface)
+            # Use error margin of 1 meter for robust calculation
+            area_m2 = farm_polygon.geometry().area(maxError=1).getInfo()
             area_ha = area_m2 / 10000
 
             # Get land cover probabilities at farm center for confidence

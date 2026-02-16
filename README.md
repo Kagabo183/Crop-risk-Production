@@ -6,24 +6,49 @@ An intelligent crop monitoring system that combines satellite imagery, weather d
 
 ---
 
-## What's New in v2.6.0 🎉
+## What's New in v2.7.0 🎉
+
+### 🎯 Composite Health Assessment (All Vegetation Indices)
+- **Multi-index health scoring** - Farm health badges now consider **ALL 5 vegetation indices** (NDVI, NDRE, NDWI, EVI, SAVI) instead of only NDVI
+- **Weighted composite algorithm**:
+  - NDVI (30%) - Primary vegetation health
+  - NDRE (20%) - Chlorophyll/nitrogen status
+  - NDWI (20%) - Water content
+  - EVI (15%) - Enhanced vegetation (atmospheric correction)
+  - SAVI (15%) - Soil-adjusted vegetation
+- **More accurate stress detection** - Considers water stress, nutrient deficiency, and atmospheric conditions
+- **Reduces false alarms** - Multiple indices must agree before showing high stress
+- **Better diagnosis** - Identifies specific stress types (drought vs. disease vs. nutrient deficiency)
+
+### 🗺️ Rwanda Boundary Validation & Farm Registration
+- **Complete farm CRUD** - Register, edit, delete farms with Rwanda boundary validation
+- **GPS location detection** - "Use My Location" button auto-fills coordinates
+- **Rwanda boundary validation** - Ensures all farms are within Rwanda (-2.85°S to -1.05°S, 28.85°E to 30.90°E)
+- **Auto-detect province** - Automatically identifies province from coordinates
+- **Auto-detect farm boundaries** - Uses Google Dynamic World land cover to detect crop boundaries from satellite
+- **Excludes forests/buildings** - Automatically removes non-crop areas from boundaries
+- **Geodesic area calculation** - Accurate hectare calculations using Shoelace formula for spherical coordinates
+- **Interactive map visualization** - View detected boundaries on Leaflet maps
+- **User ownership & RBAC** - Farmers see only their farms, agronomists see district farms, admins see all
 
 ### Real Satellite Data Integration ✅
 - **Enabled Google Earth Engine** for authentic Sentinel-2 satellite data processing
-- **Removed all simulated data** - 100% real vegetation indices (NDVI, NDRE, NDWI, EVI, SAVI)
-- **Identical coordinates = identical values** - farms at the same location now show consistent measurements
+- **Removed all simulated data** - 100% real vegetation indices calculated from satellite pixels
+- **Identical coordinates = identical values** - farms at the same location show consistent measurements
 - Fixed GEE initialization with OAuth authentication support
 
 ### Frontend Improvements 🎨
-- **Display all 5 vegetation indices** on Farms page (previously only showed NDVI)
-- **Beautiful stress monitoring cards** with color-coded metrics (replaced debug JSON dumps)
+- **Info banner** explaining composite health assessment system
+- **Display all 5 vegetation indices** on Farms page with individual values
+- **Beautiful stress monitoring cards** with color-coded metrics
 - **Fixed error handling** - proper error messages instead of silent failures
 - **Improved UX** - better visual distinction for farms with/without satellite data
 
 ### Bug Fixes 🐛
-- Fixed critical error detection logic (`.some()` instead of `.every()`)
-- Fixed NDVI status display ("stressed" instead of confusing "high" status)
-- Fixed broken conditional styling in farm cards
+- Fixed all geometry area calculation errors (Geometry.area → geodesic calculation)
+- Fixed boundary save errors (Pydantic request validation)
+- Fixed coordinate validation in farm update
+- Fixed error detection logic (`.some()` instead of `.every()`)
 - Added comprehensive error logging for debugging
 
 [See full changelog](#changelog)
@@ -73,6 +98,29 @@ The Crop Risk Prediction Platform provides:
 
 ## Key Features
 
+### Composite Health Assessment (Multi-Index Analysis)
+| Feature | Description |
+|---------|-------------|
+| **Composite health scoring** | ✅ Farm health based on **all 5 vegetation indices**, not just NDVI |
+| **Weighted algorithm** | NDVI (30%), NDRE (20%), NDWI (20%), EVI (15%), SAVI (15%) |
+| **Accurate stress detection** | Considers vegetation health, water stress, nutrients, atmospheric conditions |
+| **Specific diagnosis** | Identifies drought vs. disease vs. nutrient deficiency vs. water stress |
+| **Reduced false alarms** | Multiple indices must agree before flagging high stress |
+| **Health badges** | Healthy ≥70%, Moderate 50-70%, High stress <50% |
+
+### Farm Registration & Rwanda Boundary Validation
+| Feature | Description |
+|---------|-------------|
+| **Complete farm CRUD** | Register, edit, delete farms with Rwanda validation |
+| **GPS location** | "Use My Location" button auto-fills coordinates from device GPS |
+| **Rwanda boundary validation** | Ensures farms are within Rwanda (-2.85°S to -1.05°S, 28.85°E to 30.90°E) |
+| **Auto-detect province** | Automatically identifies province (Northern/Southern/Eastern/Western/Kigali) |
+| **Auto-detect boundaries** | Uses Google Dynamic World to detect crop boundaries from satellite |
+| **Excludes non-crop areas** | Automatically removes forests, buildings, water from boundaries |
+| **Geodesic area calculation** | Accurate hectare calculations using spherical geometry |
+| **Interactive maps** | View detected boundaries on Leaflet maps |
+| **User ownership & RBAC** | Farmers see only their farms, agronomists see district, admins see all |
+
 ### Satellite Monitoring (Real Data via Google Earth Engine)
 | Feature | Description |
 |---------|-------------|
@@ -82,6 +130,7 @@ The Crop Risk Prediction Platform provides:
 | Cloud filtering | Automatic filtering of cloudy images (<20%) |
 | Historical analysis | 90-day trend tracking |
 | Data consistency | Farms with identical coordinates show identical values (proof of real data) |
+| **Boundary-based extraction** | Extract satellite data from exact farm polygons (no neighbor mixing) |
 
 ### Disease Prediction
 | Disease | Model | Accuracy | Crops |
@@ -100,11 +149,13 @@ The Crop Risk Prediction Platform provides:
 | NOAA CDO | Historical | Global | Free |
 | IBM EIS | Commercial | Global | Paid |
 
-### Stress Detection
-- **Drought stress**: NDVI decline + low rainfall analysis
-- **Water stress**: NDWI monitoring + precipitation tracking
-- **Heat stress**: Temperature anomaly detection
-- **Nutrient deficiency**: NDRE/chlorophyll analysis
+### Stress Detection (Composite Multi-Index Assessment)
+- **Composite health score**: Weighted combination of all 5 vegetation indices (NDVI, NDRE, NDWI, EVI, SAVI)
+- **Drought stress**: NDVI decline + low rainfall + NDWI (water content) analysis
+- **Water stress**: NDWI monitoring + precipitation tracking + NDVI decline rate
+- **Heat stress**: Temperature anomaly detection + NDVI decline during heat events
+- **Nutrient deficiency**: NDRE/chlorophyll analysis + NDVI growth rate
+- **Specific diagnosis**: Identifies primary stress type (drought/water/heat/nutrient)
 
 ### Machine Learning
 | Model | Purpose | Algorithm |
@@ -316,23 +367,55 @@ The landing page provides a high-level overview of all farms:
 
 ### 2. Farm Management (`/farms`)
 
-Full CRUD for farms with integrated leaf disease scanning.
+Full CRUD for farms with integrated **GPS location**, **boundary detection**, **Rwanda validation**, and **leaf disease scanning**.
+
+**🎯 Info Banner**: Displays "Comprehensive Health Assessment" message explaining that farm health badges consider **all 5 vegetation indices** (NDVI, NDRE, NDWI, EVI, SAVI), not just NDVI.
 
 **How to register a new farm:**
 1. Click **"Register New Farm"** button
 2. Fill in the form:
    - **Farm Name** (required) — e.g. "Musanze Highland Farm"
-   - **Location / District** — e.g. "Musanze"
-   - **Province** — dropdown: Northern, Southern, Eastern, Western, Kigali
+   - **Province** — dropdown: Northern, Southern, Eastern, Western, Kigali (auto-detected from coordinates)
+   - **District** — dropdown (filtered by province)
+   - **Sector** — dropdown (filtered by district)
    - **Crop Types** — comma-separated, e.g. `potato, maize, beans` (supports multiple crops)
-   - **Area** (hectares) — e.g. `2.5`
-   - **Latitude / Longitude** — e.g. `-1.6774`, `29.2345`
+   - **Area** (hectares) — e.g. `2.5` (auto-calculated if boundary provided)
+   - **Coordinates** — click **"📍 Use My Location"** to auto-fill from device GPS, or enter manually
+     - **Latitude** — e.g. `-1.6774` (must be within Rwanda: -2.85° to -1.05°)
+     - **Longitude** — e.g. `29.2345` (must be within Rwanda: 28.85° to 30.90°)
 3. Click **"Register Farm"**
+4. ✅ **Rwanda validation** ensures coordinates are within country boundaries
+5. ✅ **Auto-triggers satellite data fetch** for the new farm coordinates
+
+**How to auto-detect farm boundary:**
+1. Click **"Edit"** on any farm card
+2. Ensure farm has coordinates (latitude/longitude)
+3. Click **"🛰️ Auto-Detect Boundary"** button
+4. System uses Google Dynamic World land cover to:
+   - Identify crop areas around farm center point
+   - Exclude forests, buildings, water, roads
+   - Generate boundary polygon
+5. View results:
+   - **Area**: Calculated in hectares
+   - **Confidence**: Land cover classification confidence (0-100%)
+   - **Land Cover**: Crop %, Forest %, etc.
+   - **Map**: Interactive Leaflet map showing detected boundary
+6. Boundary is **automatically saved** to farm database
+7. Future satellite data will be extracted **only from this boundary** (no neighbor mixing!)
+
+**How to use GPS location:**
+1. Click **"Register New Farm"** or **"Edit"** existing farm
+2. Click **"📍 Use My Location"** button
+3. Browser asks for location permission → Allow
+4. Coordinates auto-filled with your current GPS location
+5. ⚠️ **Important**: Only use GPS when you are **physically at the farm**, not at home!
+6. Province is auto-detected from coordinates
 
 **How to edit a farm:**
 1. Click the **pencil icon** on any farm card
 2. The form opens with the farm's current data pre-filled
 3. Make changes and click **"Update Farm"**
+4. If coordinates change, satellite data is automatically re-fetched
 
 **How to delete a farm:**
 1. Click the **trash icon** on any farm card
@@ -347,7 +430,16 @@ Full CRUD for farms with integrated leaf disease scanning.
    - Crop type detected
    - Whether the plant appears healthy
 
-Each farm card displays: location, crop types, area, NDVI value with progress bar, coordinates, last satellite update, and health status badge (healthy/moderate/high stress).
+**Each farm card displays**:
+- **Name** with **composite health badge** (healthy/moderate/high stress)
+  - Badge color reflects weighted score from **all 5 indices**, not just NDVI
+- **Location**: District - Sector
+- **Crop Types**: All crops (comma-separated)
+- **Size**: Area in hectares (auto-calculated from boundary if available)
+- **Coordinates**: Latitude, Longitude (if provided)
+- **Vegetation Indices**: NDVI, NDRE, NDWI, EVI, SAVI with individual values
+- **Last Update**: Timestamp of latest satellite data
+- **Edit/Delete buttons**: Farm management actions
 
 ### 3. Satellite Data (`/satellite`)
 
@@ -527,10 +619,12 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8000/api/v1/farm
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/farms` | GET, POST | List/create farms |
+| `/farms` | GET, POST | List/create farms with Rwanda validation |
 | `/farms/{id}` | GET, PUT, DELETE | Farm CRUD operations |
-| `/stress-monitoring/health/{farm_id}` | GET | Vegetation health timeseries |
-| `/stress-monitoring/stress-assessment/{farm_id}` | GET | Current stress assessment |
+| `/farms/{id}/auto-detect-boundary` | POST | Auto-detect farm boundary from satellite imagery |
+| `/farms/{id}/save-boundary` | POST | Save farm boundary polygon (from auto-detection or manual drawing) |
+| `/stress-monitoring/health/{farm_id}` | GET | Vegetation health timeseries (all 5 indices) |
+| `/stress-monitoring/stress-assessment/{farm_id}` | GET | Composite health assessment (multi-index) |
 | `/stress-monitoring/drought-assessment/{farm_id}` | GET | Drought analysis |
 | `/stress-monitoring/water-stress/{farm_id}` | GET | Water stress analysis |
 | `/stress-monitoring/heat-stress/{farm_id}` | GET | Heat stress analysis |
@@ -555,7 +649,7 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8000/api/v1/farm
 
 ### Example Requests
 
-**Get farm health assessment:**
+**Get composite health assessment (multi-index):**
 ```bash
 curl http://localhost:8000/api/v1/stress-monitoring/stress-assessment/1
 ```
@@ -569,11 +663,63 @@ curl http://localhost:8000/api/v1/stress-monitoring/stress-assessment/1
   "primary_stress": "none",
   "message": "Farm is in good health",
   "stress_breakdown": {
-    "drought": 15,
-    "water": 10,
-    "heat": 8,
-    "nutrient": 12
+    "drought": {
+      "score": 15.0,
+      "level": "low",
+      "ndvi": 0.72,
+      "ndwi": 0.42,
+      "rainfall_deficit_percent": 8.5,
+      "ndvi_trend": 0.002,
+      "message": "No significant drought stress detected"
+    },
+    "water": {
+      "score": 10.0,
+      "level": "low",
+      "ndwi": 0.42,
+      "ndvi_decline_rate": -0.001,
+      "message": "Adequate water content"
+    },
+    "heat": {
+      "score": 8.0,
+      "level": "low",
+      "heat_stress_days": 1,
+      "ndvi_decline_rate": -0.001,
+      "message": "Minimal heat stress"
+    },
+    "nutrient": {
+      "score": 12.0,
+      "level": "low",
+      "ndre": 0.52,
+      "ndvi_growth_rate": 0.015,
+      "message": "Good nutrient status"
+    }
   }
+}
+```
+
+**Auto-detect farm boundary:**
+```bash
+curl -X POST http://localhost:8000/api/v1/farms/1/auto-detect-boundary?buffer_meters=200
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "farm_id": 1,
+  "boundary": {
+    "type": "Polygon",
+    "coordinates": [[[30.0620, -1.9440], [30.0625, -1.9440], ...]]
+  },
+  "area_ha": 2.34,
+  "confidence": 0.85,
+  "land_cover": {
+    "crops": 0.78,
+    "trees": 0.15,
+    "built": 0.05,
+    "water": 0.02
+  },
+  "message": "Farm boundary detected: 2.34 hectares (confidence: 85%)"
 }
 ```
 
@@ -856,15 +1002,35 @@ Weekly  → ML model retraining
 | NOAA CDO | Historical | Daily | Free |
 | IBM EIS | Commercial forecast | Hourly | Paid |
 
-### Vegetation Indices
+### Vegetation Indices (Composite Health Assessment)
 
-| Index | Full Name | Purpose | Range |
-|-------|-----------|---------|-------|
-| NDVI | Normalized Difference Vegetation Index | Overall crop health | -1 to 1 |
-| NDRE | Normalized Difference Red Edge | Chlorophyll/nitrogen content | -1 to 1 |
-| NDWI | Normalized Difference Water Index | Water content/stress | -1 to 1 |
-| EVI | Enhanced Vegetation Index | Dense vegetation monitoring | -1 to 1 |
-| SAVI | Soil Adjusted Vegetation Index | Sparse vegetation | -1 to 1 |
+All 5 indices are used together in a **weighted composite health score** for accurate farm health assessment:
+
+| Index | Full Name | Purpose | Weight | Healthy Range |
+|-------|-----------|---------|--------|---------------|
+| NDVI | Normalized Difference Vegetation Index | Overall crop health & biomass | 30% | ≥ 0.6 |
+| NDRE | Normalized Difference Red Edge | Chlorophyll/nitrogen content | 20% | ≥ 0.5 |
+| NDWI | Normalized Difference Water Index | Water content/stress detection | 20% | ≥ 0.3 |
+| EVI | Enhanced Vegetation Index | Dense vegetation (atmospheric correction) | 15% | ≥ 0.6 |
+| SAVI | Soil Adjusted Vegetation Index | Sparse vegetation (soil brightness adjustment) | 15% | ≥ 0.5 |
+
+**Composite Score Calculation**:
+```
+Health Score = (NDVI_score × 0.30) + (NDRE_score × 0.20) + (NDWI_score × 0.20) +
+               (EVI_score × 0.15) + (SAVI_score × 0.15)
+
+Farm Badge:
+  ≥ 70% → Healthy (Green)
+  50-70% → Moderate (Yellow)
+  < 50% → High Stress (Red)
+```
+
+**Why Composite Scoring?**
+- **NDVI alone can be misleading** - doesn't distinguish between drought, disease, or nutrient deficiency
+- **NDWI detects water stress** - even when NDVI looks okay
+- **NDRE identifies nutrient issues** - low chlorophyll despite adequate water
+- **EVI corrects for atmosphere** - reduces false alarms from clouds/haze
+- **SAVI adjusts for soil** - accurate for sparse canopy or early season crops
 
 ---
 
@@ -1090,6 +1256,48 @@ For issues and feature requests, please open an issue on GitHub.
 
 ## Changelog
 
+### v2.7.0 (February 17, 2026)
+
+**🎯 Major Feature: Composite Health Assessment**
+- ✅ **Multi-index health scoring** - Farm health badges now use **all 5 vegetation indices** (NDVI, NDRE, NDWI, EVI, SAVI) with weighted composite algorithm
+- ✅ **Weighted scoring**: NDVI (30%), NDRE (20%), NDWI (20%), EVI (15%), SAVI (15%)
+- ✅ **More accurate stress detection** - Considers water stress, nutrient deficiency, atmospheric conditions
+- ✅ **Reduces false alarms** - Multiple indices must agree before showing high stress
+- ✅ **Specific diagnosis** - Identifies drought vs. disease vs. nutrient deficiency vs. water stress
+- ✅ **Info banner** in frontend explaining the composite health system
+
+**🗺️ Farm Registration & Rwanda Boundary Validation**
+- ✅ **Complete farm CRUD** - Register, edit, delete farms with Rwanda boundary validation
+- ✅ **GPS location detection** - "Use My Location" button auto-fills coordinates from device
+- ✅ **Rwanda boundary validation** - Ensures all farms within Rwanda (-2.85°S to -1.05°S, 28.85°E to 30.90°E)
+- ✅ **Auto-detect province** - Automatically identifies province from coordinates
+- ✅ **Auto-detect farm boundaries** - Uses Google Dynamic World land cover to detect crop boundaries
+- ✅ **Excludes forests/buildings** - Automatically removes non-crop areas from boundaries
+- ✅ **Geodesic area calculation** - Accurate hectare calculations using Shoelace formula for spherical coordinates
+- ✅ **Interactive map visualization** - View detected boundaries on Leaflet maps (SimpleFarmMap component)
+- ✅ **User ownership & RBAC** - Farmers see only their farms, agronomists see district, admins see all
+
+**Technical Improvements:**
+- Implemented `calculate_area_hectares()` with geodesic calculation in `rwanda_boundary.py`
+- Created `BoundarySaveRequest` Pydantic model for boundary save validation
+- Fixed all geometry area calculation errors (replaced Shapely `.area` with geodesic calculation)
+- Added `calculateCompositeHealth()` function in Farms.jsx using weighted scoring
+- Created comprehensive documentation: `COMPOSITE_HEALTH_ASSESSMENT.md`, `FARM_REGISTRATION_GUIDE.md`, `LEAFLET_SETUP_GUIDE.md`
+
+**Bug Fixes:**
+- 🐛 Fixed Geometry.area errors by implementing geodesic calculation
+- 🐛 Fixed boundary save failures (NoneType 'lower' attribute error)
+- 🐛 Fixed coordinate validation in farm update endpoint
+- 🐛 Fixed Earth Engine area calculation with `maxError=1` parameter
+- 🐛 Fixed request body mismatch in save_farm_boundary endpoint
+
+**New Endpoints:**
+- `POST /api/v1/farms/{id}/auto-detect-boundary` - Auto-detect farm boundary from satellite
+- `POST /api/v1/farms/{id}/save-boundary` - Save farm boundary polygon
+- Enhanced `/api/v1/stress-monitoring/stress-assessment/{farm_id}` with detailed multi-index breakdown
+
+[Full commit history on GitHub](https://github.com/Kagabo183/Crop-Prediction-Staging/commits/main)
+
 ### v2.6.0 (February 16, 2026)
 
 **Major Features:**
@@ -1113,8 +1321,6 @@ For issues and feature requests, please open an issue on GitHub.
 - Fixed silent error handling in multiple components
 - Fixed broken conditional styling in Farms page
 
-[Full commit history on GitHub](https://github.com/Kagabo183/Crop-Prediction-Staging/commits/main)
-
 ### v2.5.0 (February 15, 2026)
 - Potato disease classification model (99.7% accuracy)
 - Fixed Grad-CAM visualization
@@ -1130,6 +1336,6 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Version**: 2.6.0
-**Last Updated**: February 16, 2026
+**Version**: 2.7.0
+**Last Updated**: February 17, 2026
 **Maintainer**: Crop Risk Platform Team
