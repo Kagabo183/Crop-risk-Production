@@ -91,13 +91,19 @@ def check_farm_access(farm, user: UserModel):
     """
     Enforce farm access rules:
     - Admin: All access
+    - Viewer: Read-only access to all (metrics only)
+    - Demo farms (owner_id = NULL): Accessible to all authenticated users
     - Agronomist: Access only if farm is in their district
     - Farmer: Access only if they own the farm
-    - Viewer: Read-only access to all (metrics only)
     """
+    # Admin and viewer have full access
     if user.role == "admin" or user.role == "viewer":
         return True
-    
+
+    # Demo farms (no owner) are accessible to all authenticated users
+    if farm.owner_id is None:
+        return True
+
     if user.role == "agronomist":
         # Handle "District - Sector" format in farm location
         farm_district = farm.location.split(" - ")[0] if farm.location and " - " in farm.location else farm.location
@@ -115,5 +121,5 @@ def check_farm_access(farm, user: UserModel):
                 detail="Access denied. You do not own this farm."
             )
         return True
-    
+
     return False

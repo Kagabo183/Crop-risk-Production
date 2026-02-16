@@ -55,11 +55,17 @@ export default function Dashboard() {
     else healthyCounts.stressed++
   })
 
-  const pieData = [
-    { name: 'Healthy', value: healthyCounts.healthy, color: '#16a34a' },
-    { name: 'Moderate', value: healthyCounts.moderate, color: '#d97706' },
-    { name: 'Stressed', value: healthyCounts.stressed, color: '#dc2626' },
-  ].filter(d => d.value > 0)
+  const pieData = hasRole('agronomist', 'admin')
+    ? [
+      { name: 'Healthy', value: healthyCounts.healthy, color: '#16a34a' },
+      { name: 'Moderate', value: healthyCounts.moderate, color: '#d97706' },
+      { name: 'Stressed', value: healthyCounts.stressed, color: '#dc2626' },
+    ].filter(d => d.value > 0)
+    : [
+      { name: 'Doing Well', value: healthyCounts.healthy, color: '#16a34a' },
+      { name: 'Watch Closely', value: healthyCounts.moderate, color: '#d97706' },
+      { name: 'Needs Care', value: healthyCounts.stressed, color: '#dc2626' },
+    ].filter(d => d.value > 0)
 
   const ndviChart = satellite
     .filter(f => f.ndvi != null)
@@ -90,19 +96,21 @@ export default function Dashboard() {
         <div className="stat-card">
           <div className="stat-icon green"><Satellite size={22} /></div>
           <div className="stat-info">
-            <h4>Avg NDVI</h4>
+            <h4>{hasRole('agronomist', 'admin') ? 'Avg NDVI' : 'Avg Crop Health'}</h4>
             <div className="stat-value">{avgNdvi}</div>
             <div className={`stat-change ${Number(avgNdvi) >= 0.5 ? 'positive' : 'negative'}`}>
-              {Number(avgNdvi) >= 0.5 ? 'Healthy range' : 'Below healthy'}
+              {hasRole('agronomist', 'admin')
+                ? (Number(avgNdvi) >= 0.5 ? 'Healthy range' : 'Below healthy')
+                : (Number(avgNdvi) >= 0.6 ? 'Doing well' : Number(avgNdvi) >= 0.4 ? 'Watch closely' : 'Needs care')}
             </div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon orange"><Activity size={22} /></div>
           <div className="stat-info">
-            <h4>Stressed Farms</h4>
+            <h4>{hasRole('agronomist', 'admin') ? 'Stressed Farms' : 'Farms Needing Care'}</h4>
             <div className="stat-value">{healthyCounts.stressed}</div>
-            <div className="stat-change negative">Need attention</div>
+            <div className="stat-change negative">{hasRole('agronomist', 'admin') ? 'Need attention' : 'Take action soon'}</div>
           </div>
         </div>
         <div className="stat-card">
@@ -120,8 +128,8 @@ export default function Dashboard() {
         {/* NDVI Bar Chart */}
         <div className="card">
           <div className="card-header">
-            <h3>Vegetation Health (NDVI)</h3>
-            <Link to="/satellite" className="btn btn-sm btn-secondary">View All Indices</Link>
+            <h3>{hasRole('agronomist', 'admin') ? 'Vegetation Health (NDVI)' : 'Farm Health Comparison'}</h3>
+            <Link to="/satellite" className="btn btn-sm btn-secondary">{hasRole('agronomist', 'admin') ? 'View All Indices' : 'View Details'}</Link>
           </div>
           <div className="card-body">
             {ndviChart.length > 0 ? (
@@ -211,11 +219,23 @@ export default function Dashboard() {
                   <th>Location</th>
                   <th>Crop</th>
                   <th>Size (ha)</th>
-                  <th title="Normalized Difference Vegetation Index - Overall vegetation health">NDVI</th>
-                  <th title="Normalized Difference Red Edge - Chlorophyll content">NDRE</th>
-                  <th title="Normalized Difference Water Index - Water/moisture stress">NDWI</th>
-                  <th title="Enhanced Vegetation Index - Canopy structure">EVI</th>
-                  <th title="Soil Adjusted Vegetation Index - Vegetation with soil influence">SAVI</th>
+                  {hasRole('agronomist', 'admin') ? (
+                    <>
+                      <th title="Normalized Difference Vegetation Index - Overall vegetation health">NDVI</th>
+                      <th title="Normalized Difference Red Edge - Chlorophyll content">NDRE</th>
+                      <th title="Normalized Difference Water Index - Water/moisture stress">NDWI</th>
+                      <th title="Enhanced Vegetation Index - Canopy structure">EVI</th>
+                      <th title="Soil Adjusted Vegetation Index - Vegetation with soil influence">SAVI</th>
+                    </>
+                  ) : (
+                    <>
+                      <th title="How green and healthy your crops look">Crop Health</th>
+                      <th title="Leaf color and nutrient status">Leaf Color</th>
+                      <th title="Water and moisture in plants">Water Status</th>
+                      <th title="How thick and full your crops are">Canopy</th>
+                      <th title="Crop coverage on the ground">Ground Cover</th>
+                    </>
+                  )}
                   <th>Status</th>
                 </tr>
               </thead>
@@ -229,7 +249,12 @@ export default function Dashboard() {
                   const savi = sat?.savi
                   // NDVI interpretation: >=0.6 healthy, 0.4-0.6 moderate, <0.4 stressed
                   const status = ndvi == null ? 'unknown' : ndvi >= 0.6 ? 'healthy' : ndvi >= 0.4 ? 'moderate' : 'stressed'
-                  const displayStatus = status === 'unknown' ? 'No data' : status === 'stressed' ? 'Stressed' : status.charAt(0).toUpperCase() + status.slice(1)
+
+                  // Farmer-friendly status messages
+                  const displayStatus = hasRole('agronomist', 'admin')
+                    ? (status === 'unknown' ? 'No data' : status === 'stressed' ? 'Stressed' : status.charAt(0).toUpperCase() + status.slice(1))
+                    : (status === 'unknown' ? 'No data' : status === 'stressed' ? '⚠️ Needs Care' : status === 'moderate' ? '👀 Watch' : '✅ Doing Well')
+
                   return (
                     <tr key={farm.id}>
                       <td><strong>{farm.name}</strong></td>

@@ -493,35 +493,58 @@ def _run_fetch_task(days_back: int = 90, weather_days: int = 7, db_url: str = No
                         db.add(sat)
                         result["satellite_records"] += 1
 
-                # Create latest vegetation health record
-                if observations:
-                    latest = observations[0]  # Already sorted desc
-                    obs_date = latest["date"].date() if hasattr(latest["date"], "date") else latest["date"]
+                # Create vegetation health records for ALL observations (not just latest)
+                # Stress monitoring needs historical data for trend analysis
 
+                # Deduplicate observations by date (keep lowest cloud cover per date)
+                # This prevents unique constraint violations when multiple satellite passes occur on same day
+                obs_by_date = {}
+                for obs in observations:
+                    obs_date = obs["date"].date() if hasattr(obs["date"], "date") else obs["date"]
+                    if obs_date not in obs_by_date:
+                        obs_by_date[obs_date] = obs
+                    else:
+                        # Keep observation with lower cloud cover
+                        if obs.get("cloud_cover", 100) < obs_by_date[obs_date].get("cloud_cover", 100):
+                            obs_by_date[obs_date] = obs
+
+                # Now create/update vegetation health records (one per unique date)
+                for obs_date, obs in obs_by_date.items():
                     existing_vh = db.query(VegetationHealth).filter(
                         VegetationHealth.farm_id == farm.id,
                         VegetationHealth.date == obs_date,
                     ).first()
 
-                    ndvi_val = latest.get("ndvi")
-                    ndre_val = latest.get("ndre")
-                    ndwi_val = latest.get("ndwi")
-                    evi_val = latest.get("evi")
-                    savi_val = latest.get("savi")
+                    ndvi_val = obs.get("ndvi")
+                    ndre_val = obs.get("ndre")
+                    ndwi_val = obs.get("ndwi")
+                    evi_val = obs.get("evi")
+                    savi_val = obs.get("savi")
 
                     health_score, stress_level, stress_type = _classify_vegetation_health(
                         ndvi_val, ndre_val, ndwi_val, evi_val, savi_val
                     )
 
-                    if not existing_vh:
+                    if existing_vh:
+                        # Update existing record with best observation for this date
+                        existing_vh.ndvi = obs.get("ndvi")
+                        existing_vh.ndre = obs.get("ndre")
+                        existing_vh.ndwi = obs.get("ndwi")
+                        existing_vh.evi = obs.get("evi")
+                        existing_vh.savi = obs.get("savi")
+                        existing_vh.health_score = health_score
+                        existing_vh.stress_level = stress_level
+                        existing_vh.stress_type = stress_type
+                    else:
+                        # Create new record
                         vh = VegetationHealth(
                             farm_id=farm.id,
                             date=obs_date,
-                            ndvi=latest.get("ndvi"),
-                            ndre=latest.get("ndre"),
-                            ndwi=latest.get("ndwi"),
-                            evi=latest.get("evi"),
-                            savi=latest.get("savi"),
+                            ndvi=obs.get("ndvi"),
+                            ndre=obs.get("ndre"),
+                            ndwi=obs.get("ndwi"),
+                            evi=obs.get("evi"),
+                            savi=obs.get("savi"),
                             health_score=health_score,
                             stress_level=stress_level,
                             stress_type=stress_type,
