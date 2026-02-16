@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from app.models.data import VegetationHealth, WeatherRecord, SatelliteImage
 from app.models.farm import Farm
+from app.core.alert_messages import AlertMessageTemplates
 import logging
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,10 @@ class StressDetectionService:
         else:
             level = 'none'
         
+        # Get both message versions + action recommendations
+        tech_msg, action, days = self._get_drought_message(level, score, is_farmer=False)
+        farmer_msg, _, _ = self._get_drought_message(level, score, is_farmer=True)
+
         return {
             'score': round(score, 1),
             'level': level,
@@ -158,7 +163,12 @@ class StressDetectionService:
             'ndwi': round(current_ndwi, 3),
             'rainfall_deficit_percent': round(rainfall_deficit, 1),
             'ndvi_trend': round(ndvi_trend, 4),
-            'message': self._get_drought_message(level, score)
+            'message': tech_msg,  # Default to technical
+            'message_farmer': farmer_msg,
+            'message_technical': tech_msg,
+            'action': action,
+            'action_days_min': days[0] if days else None,
+            'action_days_max': days[1] if days else None
         }
     
     def detect_water_stress(
@@ -242,12 +252,21 @@ class StressDetectionService:
         else:
             level = 'none'
         
+        # Get both message versions + action recommendations
+        tech_msg, action, days = self._get_water_stress_message(level, score, is_farmer=False)
+        farmer_msg, _, _ = self._get_water_stress_message(level, score, is_farmer=True)
+
         return {
             'score': round(score, 1),
             'level': level,
             'ndwi': round(current_ndwi, 3),
             'ndvi_decline_rate': round(ndvi_decline_rate, 4),
-            'message': self._get_water_stress_message(level, score)
+            'message': tech_msg,  # Default to technical
+            'message_farmer': farmer_msg,
+            'message_technical': tech_msg,
+            'action': action,
+            'action_days_min': days[0] if days else None,
+            'action_days_max': days[1] if days else None
         }
     
     def detect_heat_stress(
@@ -333,12 +352,21 @@ class StressDetectionService:
         else:
             level = 'none'
         
+        # Get both message versions + action recommendations
+        tech_msg, action, days = self._get_heat_stress_message(level, score, heat_stress_days, is_farmer=False)
+        farmer_msg, _, _ = self._get_heat_stress_message(level, score, heat_stress_days, is_farmer=True)
+
         return {
             'score': round(score, 1),
             'level': level,
             'heat_stress_days': heat_stress_days,
             'ndvi_decline_rate': round(ndvi_decline_rate, 4),
-            'message': self._get_heat_stress_message(level, score, heat_stress_days)
+            'message': tech_msg,  # Default to technical
+            'message_farmer': farmer_msg,
+            'message_technical': tech_msg,
+            'action': action,
+            'action_days_min': days[0] if days else None,
+            'action_days_max': days[1] if days else None
         }
     
     def detect_nutrient_deficiency(
@@ -426,12 +454,21 @@ class StressDetectionService:
         else:
             level = 'none'
         
+        # Get both message versions + action recommendations
+        tech_msg, action, days = self._get_nutrient_message(level, score, is_farmer=False)
+        farmer_msg, _, _ = self._get_nutrient_message(level, score, is_farmer=True)
+
         return {
             'score': round(score, 1),
             'level': level,
             'ndre': round(current_ndre, 3),
             'ndvi_growth_rate': round(ndvi_growth_rate, 4),
-            'message': self._get_nutrient_message(level, score)
+            'message': tech_msg,  # Default to technical
+            'message_farmer': farmer_msg,
+            'message_technical': tech_msg,
+            'action': action,
+            'action_days_min': days[0] if days else None,
+            'action_days_max': days[1] if days else None
         }
     
     def calculate_composite_health_score(
@@ -494,18 +531,28 @@ class StressDetectionService:
         else:
             stress_level = 'none'
         
+        # Get both message versions + action recommendations
+        primary_stress_type = primary_stress if stress_scores[primary_stress] > 20 else 'none'
+        tech_msg, action, days = self._get_composite_message(health_score, stress_level, primary_stress_type, is_farmer=False)
+        farmer_msg, _, _ = self._get_composite_message(health_score, stress_level, primary_stress_type, is_farmer=True)
+
         return {
             'health_score': round(health_score, 1),
             'stress_score': round(composite_stress_score, 1),
             'stress_level': stress_level,
-            'primary_stress': primary_stress if stress_scores[primary_stress] > 20 else 'none',
+            'primary_stress': primary_stress_type,
             'stress_breakdown': {
                 'drought': drought,
                 'water': water,
                 'heat': heat,
                 'nutrient': nutrient
             },
-            'message': self._get_composite_message(health_score, stress_level, primary_stress)
+            'message': tech_msg,  # Default to technical
+            'message_farmer': farmer_msg,
+            'message_technical': tech_msg,
+            'action': action,
+            'action_days_min': days[0] if days else None,
+            'action_days_max': days[1] if days else None
         }
     
     def update_vegetation_health_record(
@@ -574,55 +621,23 @@ class StressDetectionService:
         db.refresh(veg_health)
         return veg_health
     
-    # Helper methods for messages
-    def _get_drought_message(self, level: str, score: float) -> str:
-        messages = {
-            'severe': f'Severe drought stress detected (score: {score:.1f}). Immediate irrigation recommended.',
-            'high': f'High drought stress (score: {score:.1f}). Consider irrigation within 24-48 hours.',
-            'moderate': f'Moderate drought stress (score: {score:.1f}). Monitor closely and prepare for irrigation.',
-            'low': f'Low drought stress (score: {score:.1f}). Continue routine monitoring.',
-            'none': f'No significant drought stress (score: {score:.1f}).'
-        }
-        return messages.get(level, 'Unknown stress level')
-    
-    def _get_water_stress_message(self, level: str, score: float) -> str:
-        messages = {
-            'severe': f'Severe water stress detected (score: {score:.1f}). Immediate action required.',
-            'high': f'High water stress (score: {score:.1f}). Increase irrigation frequency.',
-            'moderate': f'Moderate water stress (score: {score:.1f}). Monitor soil moisture.',
-            'low': f'Low water stress (score: {score:.1f}). Normal irrigation schedule.',
-            'none': f'No significant water stress (score: {score:.1f}).'
-        }
-        return messages.get(level, 'Unknown stress level')
-    
-    def _get_heat_stress_message(self, level: str, score: float, heat_days: int) -> str:
-        messages = {
-            'severe': f'Severe heat stress ({heat_days} days >35°C, score: {score:.1f}). Provide shade or cooling if possible.',
-            'high': f'High heat stress ({heat_days} days >35°C, score: {score:.1f}). Monitor crop closely.',
-            'moderate': f'Moderate heat stress ({heat_days} days >35°C, score: {score:.1f}). Watch for heat damage.',
-            'low': f'Low heat stress ({heat_days} days >35°C, score: {score:.1f}). Normal monitoring.',
-            'none': f'No significant heat stress (score: {score:.1f}).'
-        }
-        return messages.get(level, 'Unknown stress level')
-    
-    def _get_nutrient_message(self, level: str, score: float) -> str:
-        messages = {
-            'severe': f'Severe nutrient deficiency suspected (score: {score:.1f}). Soil testing and fertilization recommended.',
-            'high': f'High nutrient deficiency (score: {score:.1f}). Consider fertilizer application.',
-            'moderate': f'Moderate nutrient deficiency (score: {score:.1f}). Monitor growth and consider supplementation.',
-            'low': f'Low nutrient deficiency (score: {score:.1f}). Routine fertilization schedule.',
-            'none': f'No significant nutrient deficiency (score: {score:.1f}).'
-        }
-        return messages.get(level, 'Unknown stress level')
-    
-    def _get_composite_message(self, health_score: float, stress_level: str, primary_stress: str) -> str:
-        if stress_level == 'severe':
-            return f'Farm health: {health_score:.1f}/100 (Severe stress). Primary issue: {primary_stress}. Immediate intervention required.'
-        elif stress_level == 'high':
-            return f'Farm health: {health_score:.1f}/100 (High stress). Primary issue: {primary_stress}. Action needed within 24-48 hours.'
-        elif stress_level == 'moderate':
-            return f'Farm health: {health_score:.1f}/100 (Moderate stress). Primary issue: {primary_stress}. Enhanced monitoring recommended.'
-        elif stress_level == 'low':
-            return f'Farm health: {health_score:.1f}/100 (Low stress). Continue routine management.'
-        else:
-            return f'Farm health: {health_score:.1f}/100 (Healthy). No significant stress detected.'
+    # Helper methods for messages - now use centralized templates
+    def _get_drought_message(self, level: str, score: float, is_farmer: bool = False) -> Tuple[str, str, tuple]:
+        """Get drought message with action and days. Returns (message, action, days_tuple)"""
+        return AlertMessageTemplates.get_drought_message(level, score, is_farmer)
+
+    def _get_water_stress_message(self, level: str, score: float, is_farmer: bool = False) -> Tuple[str, str, tuple]:
+        """Get water stress message with action and days. Returns (message, action, days_tuple)"""
+        return AlertMessageTemplates.get_water_stress_message(level, score, is_farmer)
+
+    def _get_heat_stress_message(self, level: str, score: float, heat_days: int, is_farmer: bool = False) -> Tuple[str, str, tuple]:
+        """Get heat stress message with action and days. Returns (message, action, days_tuple)"""
+        return AlertMessageTemplates.get_heat_stress_message(level, score, heat_days, is_farmer)
+
+    def _get_nutrient_message(self, level: str, score: float, is_farmer: bool = False) -> Tuple[str, str, tuple]:
+        """Get nutrient message with action and days. Returns (message, action, days_tuple)"""
+        return AlertMessageTemplates.get_nutrient_message(level, score, is_farmer)
+
+    def _get_composite_message(self, health_score: float, stress_level: str, primary_stress: str, is_farmer: bool = False) -> Tuple[str, str, tuple]:
+        """Get composite stress message with action and days. Returns (message, action, days_tuple)"""
+        return AlertMessageTemplates.get_stress_message(health_score, stress_level, primary_stress, is_farmer)

@@ -138,15 +138,20 @@ def detect_stress_zones():
                     if not existing_alert:
                         level_map = {'severe': 'critical', 'high': 'high', 'moderate': 'medium'}
                         stress_level = assessment.get('stress_level', 'high')
-                        # Map to alert levels, default to high since score >= 60
                         alert_level = level_map.get(stress_level, 'high')
 
-                        primary = assessment.get('primary_stress', 'General')
-                        message = assessment.get('message', f"High {primary} stress detected. Score: {assessment['stress_score']}")
+                        # Default to farmer-friendly message (most users are farmers)
+                        message = assessment.get('message_farmer', assessment.get('message'))
 
-                        # Action days based on stress severity
-                        action_days_map = {'severe': (1, 3), 'high': (2, 5), 'moderate': (5, 10)}
-                        action_days = action_days_map.get(stress_level, (5, 10))
+                        # Action days from assessment (now includes this info)
+                        action_days_min = assessment.get('action_days_min')
+                        action_days_max = assessment.get('action_days_max')
+
+                        # Fallback if not in assessment
+                        if action_days_min is None or action_days_max is None:
+                            action_days_map = {'severe': (1, 3), 'high': (2, 5), 'moderate': (5, 10)}
+                            action_days = action_days_map.get(stress_level, (5, 10))
+                            action_days_min, action_days_max = action_days
 
                         new_alert = Alert(
                             farm_id=farm.id,
@@ -154,8 +159,18 @@ def detect_stress_zones():
                             level=alert_level,
                             alert_type='vegetation_stress',
                             source='satellite',
-                            action_days_min=action_days[0],
-                            action_days_max=action_days[1],
+                            severity=stress_level,
+                            action_days_min=action_days_min,
+                            action_days_max=action_days_max,
+                            alert_data={
+                                'message_farmer': assessment.get('message_farmer'),
+                                'message_technical': assessment.get('message_technical'),
+                                'action': assessment.get('action'),
+                                'health_score': assessment.get('health_score'),
+                                'stress_score': assessment.get('stress_score'),
+                                'primary_stress': assessment.get('primary_stress'),
+                                'stress_breakdown': assessment.get('stress_breakdown')
+                            }
                         )
                         db.add(new_alert)
                         db.commit()

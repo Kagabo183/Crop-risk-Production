@@ -13,6 +13,7 @@ from app.db.database import SessionLocal
 from app.models.farm import Farm
 from app.models.data import SatelliteImage, WeatherRecord
 from app.models.alert import Alert
+from app.core.alert_messages import AlertMessageTemplates
 
 logger = logging.getLogger(__name__)
 
@@ -297,17 +298,37 @@ def batch_risk_assessment_task() -> Dict[str, Any]:
                 if result['risk_level'] in ['high', 'critical']:
                     high_risk_farms.append(farm.id)
 
-                    action_days = (1, 3) if result['risk_level'] == 'critical' else (2, 5)
+                    # Get role-based messages
+                    farmer_msg, action, days = AlertMessageTemplates.get_ml_risk_message(
+                        result['risk_level'],
+                        result['overall_risk_score'],
+                        result['primary_driver'],
+                        is_farmer=True
+                    )
+                    tech_msg, _, _ = AlertMessageTemplates.get_ml_risk_message(
+                        result['risk_level'],
+                        result['overall_risk_score'],
+                        result['primary_driver'],
+                        is_farmer=False
+                    )
+
                     alert = Alert(
                         farm_id=farm.id,
-                        message=f"[ML] {result['risk_level'].upper()} risk detected "
-                               f"(score: {result['overall_risk_score']:.0f}). "
-                               f"Primary driver: {result['primary_driver']}",
+                        message=farmer_msg,  # Default to farmer-friendly
                         level=result['risk_level'],
                         alert_type='risk_assessment',
                         source='ml_model',
-                        action_days_min=action_days[0],
-                        action_days_max=action_days[1],
+                        severity=result['risk_level'],
+                        action_days_min=days[0] if days else None,
+                        action_days_max=days[1] if days else None,
+                        alert_data={
+                            'message_farmer': farmer_msg,
+                            'message_technical': tech_msg,
+                            'action': action,
+                            'risk_score': result['overall_risk_score'],
+                            'primary_driver': result['primary_driver'],
+                            'risk_factors': result.get('risk_factors')
+                        }
                     )
                     db.add(alert)
 
@@ -379,15 +400,36 @@ def detect_anomalies_all_farms_task() -> Dict[str, Any]:
                 # Create alert for significant anomalies
                 if anomalies[0].get('severity') in ['severe', 'critical']:
                     anom_days = (1, 3) if anomalies[0].get('severity') == 'critical' else (2, 5)
+                    severity = anomalies[0].get('severity', 'severe')
+                    anom_type = anomalies[0].get('anomaly_type', 'Unknown').lower()
+
+                    # Create farmer-friendly and technical messages
+                    if severity == 'critical':
+                        farmer_msg = f"⚠️ URGENT: AI detected unusual {anom_type}. Check your crops immediately!"
+                        tech_msg = f"[ML ANOMALY] Critical {anom_type} detected. Immediate inspection required."
+                        action = "Inspect crops within 1-3 days, investigate cause"
+                    else:  # severe
+                        farmer_msg = f"⚠️ Warning: AI found unusual {anom_type}. Check your farm soon."
+                        tech_msg = f"[ML ANOMALY] Severe {anom_type} detected. Investigation recommended."
+                        action = "Inspect affected area within 2-5 days"
+
                     alert = Alert(
                         farm_id=farm.id,
-                        message=f"[ML ANOMALY] {anomalies[0].get('anomaly_type', 'Unknown')} "
-                               f"detected. Severity: {anomalies[0].get('severity')}",
+                        message=farmer_msg,  # Default to farmer-friendly
                         level='high',
                         alert_type='anomaly_detection',
                         source='ml_model',
+                        severity=severity,
                         action_days_min=anom_days[0],
                         action_days_max=anom_days[1],
+                        alert_data={
+                            'message_farmer': farmer_msg,
+                            'message_technical': tech_msg,
+                            'action': action,
+                            'anomaly_type': anom_type,
+                            'severity': severity,
+                            'anomalies': anomalies
+                        }
                     )
                     db.add(alert)
 
@@ -464,15 +506,30 @@ def generate_health_forecasts_task(forecast_days: int = 7) -> Dict[str, Any]:
                 # Create alert for declining trends
                 if forecast.get('trend_direction') == 'declining':
                     if forecast.get('min_forecast', 70) < 50:
+                        min_forecast = forecast.get('min_forecast', 0)
+
+                        # Create farmer-friendly and technical messages
+                        farmer_msg = f"📉 Heads up: AI predicts your crop health may drop to {min_forecast:.0f}/100. Plan preventive action in 5-10 days."
+                        tech_msg = f"[ML FORECAST] Declining health trend predicted. Minimum forecast: {min_forecast:.0f}/100. Preventive measures recommended."
+                        action = "Monitor closely, prepare interventions (irrigation, fertilizer, etc.)"
+
                         alert = Alert(
                             farm_id=farm.id,
-                            message=f"[ML FORECAST] Declining health trend predicted. "
-                                   f"Min forecast: {forecast.get('min_forecast', 0):.0f}",
+                            message=farmer_msg,  # Default to farmer-friendly
                             level='moderate',
                             alert_type='health_forecast',
                             source='ml_model',
+                            severity='moderate',
                             action_days_min=5,
                             action_days_max=10,
+                            alert_data={
+                                'message_farmer': farmer_msg,
+                                'message_technical': tech_msg,
+                                'action': action,
+                                'min_forecast': min_forecast,
+                                'trend_direction': forecast.get('trend_direction'),
+                                'forecast_days': forecast_days
+                            }
                         )
                         db.add(alert)
                         alerts_created += 1

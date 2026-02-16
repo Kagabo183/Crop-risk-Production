@@ -20,6 +20,24 @@ export default function StressMonitoring() {
   const [heat, setHeat] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [user, setUser] = useState(null)
+
+  // Load user from localStorage
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user')
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser))
+      } catch (e) {
+        console.error('Failed to parse user from localStorage')
+      }
+    }
+  }, [])
+
+  // Helper to check if user has any of the specified roles
+  const hasRole = (...roles) => {
+    return user && roles.includes(user.role)
+  }
 
   useEffect(() => {
     getFarms().then(r => {
@@ -138,6 +156,36 @@ export default function StressMonitoring() {
             )}
           </div>
 
+          {/* Overall Assessment Message & Action */}
+          {(stress.message || stress.message_farmer || stress.message_technical) && (
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="card-body">
+                <div style={{ fontSize: 14, marginBottom: 12, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                  {hasRole('farmer')
+                    ? (stress.message_farmer || stress.message)
+                    : (stress.message_technical || stress.message)
+                  }
+                </div>
+                {stress.action && (
+                  <div style={{
+                    fontSize: 13,
+                    padding: 12,
+                    background: stress.stress_level === 'severe' || stress.stress_level === 'high' ? '#fef3c7' : '#f0fdf4',
+                    borderLeft: `4px solid ${stress.stress_level === 'severe' || stress.stress_level === 'high' ? '#f59e0b' : '#22c55e'}`,
+                    borderRadius: 4
+                  }}>
+                    <strong>💡 Recommended Action:</strong> {stress.action}
+                    {stress.action_days_min && stress.action_days_max && (
+                      <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                        ⏰ Timeline: Take action within {stress.action_days_min}-{stress.action_days_max} days
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Stress Breakdown */}
           {stress.stress_breakdown && (
             <div className="card" style={{ marginBottom: 20 }}>
@@ -231,8 +279,32 @@ export default function StressMonitoring() {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Drought Score (0-100)</div>
                   </div>
-                  {drought.message && (
-                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{drought.message}</p>
+                  {/* Display role-appropriate message */}
+                  {(drought.message || drought.message_farmer || drought.message_technical) && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                      {hasRole('farmer')
+                        ? (drought.message_farmer || drought.message)
+                        : (drought.message_technical || drought.message)
+                      }
+                    </p>
+                  )}
+                  {/* Action recommendation */}
+                  {drought.action && (
+                    <div style={{
+                      fontSize: 13,
+                      padding: 10,
+                      background: drought.level === 'severe' || drought.level === 'high' ? '#fef3c7' : '#f0fdf4',
+                      borderLeft: `3px solid ${drought.level === 'severe' || drought.level === 'high' ? '#f59e0b' : '#22c55e'}`,
+                      borderRadius: 4,
+                      marginBottom: 12
+                    }}>
+                      <strong>💡 Recommended Action:</strong> {drought.action}
+                      {drought.action_days_min && drought.action_days_max && (
+                        <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+                          ⏰ Timeline: {drought.action_days_min}-{drought.action_days_max} days
+                        </span>
+                      )}
+                    </div>
                   )}
                   <div style={{ display: 'grid', gap: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -276,8 +348,32 @@ export default function StressMonitoring() {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Water Stress Score (0-100)</div>
                   </div>
-                  {water.message && (
-                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{water.message}</p>
+                  {/* Display role-appropriate message */}
+                  {(water.message || water.message_farmer || water.message_technical) && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                      {hasRole('farmer')
+                        ? (water.message_farmer || water.message)
+                        : (water.message_technical || water.message)
+                      }
+                    </p>
+                  )}
+                  {/* Action recommendation */}
+                  {water.action && (
+                    <div style={{
+                      fontSize: 13,
+                      padding: 10,
+                      background: water.level === 'severe' || water.level === 'high' ? '#fef3c7' : '#f0fdf4',
+                      borderLeft: `3px solid ${water.level === 'severe' || water.level === 'high' ? '#f59e0b' : '#22c55e'}`,
+                      borderRadius: 4,
+                      marginBottom: 12
+                    }}>
+                      <strong>💡 Recommended Action:</strong> {water.action}
+                      {water.action_days_min && water.action_days_max && (
+                        <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+                          ⏰ Timeline: {water.action_days_min}-{water.action_days_max} days
+                        </span>
+                      )}
+                    </div>
                   )}
                   <div style={{ display: 'grid', gap: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -309,8 +405,32 @@ export default function StressMonitoring() {
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Heat Stress Score (0-100)</div>
                   </div>
-                  {heat.message && (
-                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>{heat.message}</p>
+                  {/* Display role-appropriate message */}
+                  {(heat.message || heat.message_farmer || heat.message_technical) && (
+                    <p style={{ fontSize: 14, marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                      {hasRole('farmer')
+                        ? (heat.message_farmer || heat.message)
+                        : (heat.message_technical || heat.message)
+                      }
+                    </p>
+                  )}
+                  {/* Action recommendation */}
+                  {heat.action && (
+                    <div style={{
+                      fontSize: 13,
+                      padding: 10,
+                      background: heat.level === 'severe' || heat.level === 'high' ? '#fef3c7' : '#f0fdf4',
+                      borderLeft: `3px solid ${heat.level === 'severe' || heat.level === 'high' ? '#f59e0b' : '#22c55e'}`,
+                      borderRadius: 4,
+                      marginBottom: 12
+                    }}>
+                      <strong>💡 Recommended Action:</strong> {heat.action}
+                      {heat.action_days_min && heat.action_days_max && (
+                        <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
+                          ⏰ Timeline: {heat.action_days_min}-{heat.action_days_max} days
+                        </span>
+                      )}
+                    </div>
                   )}
                   <div style={{ display: 'grid', gap: 8 }}>
                     {heat.heat_stress_days != null && (
