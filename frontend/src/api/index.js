@@ -53,6 +53,16 @@ export const autoDetectBoundary = (farmId, bufferMeters = 200) =>
 export const saveFarmBoundary = (farmId, boundaryGeoJson) =>
   api.post(`/farms/${farmId}/save-boundary`, { boundary_geojson: boundaryGeoJson })
 
+export const detectLocation = (latitude, longitude) =>
+  api.get('/farms/detect-location', { params: { latitude, longitude } })
+
+// ── Cadastral Parcels ──
+export const searchParcels = (upi, limit = 20) =>
+  api.get('/parcels/search', { params: { upi, limit } })
+export const findParcelByLocation = (lat, lon, radiusM = 50) =>
+  api.get('/parcels/find-by-location', { params: { lat, lon, radius_m: radiusM } })
+export const getParcelStats = () => api.get('/parcels/stats')
+
 // ── Stress Monitoring ──
 export const getVegetationHealth = (farmId, daysBack = 90) =>
   api.get(`/stress-monitoring/health/${farmId}`, { params: { days_back: daysBack } })

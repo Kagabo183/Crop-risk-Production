@@ -7,7 +7,6 @@ import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import numpy as np
-import random
 from sqlalchemy.orm import Session
 from app.models.data import SatelliteImage, VegetationHealth
 from app.models.farm import Farm
@@ -330,28 +329,81 @@ class SatelliteDataService:
     ) -> Dict[str, float]:
         """Calculate vegetation indices using Microsoft Planetary Computer"""
         try:
-            # Log buffer vs farm area warning
-            if farm_area:
-                analyzed_area_ha = (3.14159 * buffer_meters * buffer_meters) / 10000
-                if analyzed_area_ha > farm_area * 2:
-                    logger.error(f"🚨 CRITICAL: Buffer area ({analyzed_area_ha:.2f} ha) is {analyzed_area_ha/farm_area:.1f}x larger than farm ({farm_area:.2f} ha)!")
+            import rioxarray
+            import planetary_computer as pc
 
-            base_val = (lat + lon) * 100
-            seed_val = int(base_val) + int(image_data.get('date', datetime.now()).timestamp())
-            random.seed(seed_val)
+            item = image_data.get('item')
+            if item is None:
+                logger.error("No STAC item provided for Planetary Computer index calculation")
+                return {}
 
-            # Generate realistic simulated values based on location consistency
-            # NDVI: 0.4-0.8 for healthy vegetation, lower for stressed crops
-            base_ndvi = random.uniform(0.45, 0.75)
-            logger.warning(f"⚠️ Generating SIMULATED vegetation indices (NDVI: {base_ndvi:.3f}) for ({lat}, {lon}) - NOT real satellite data!")
+            # Sign the assets for access
+            signed_item = pc.sign(item)
+
+            # Load bands
+            nir_href = signed_item.assets['B08'].href
+            red_href = signed_item.assets['B04'].href
+            red_edge_href = signed_item.assets['B05'].href
+            green_href = signed_item.assets['B03'].href
+            blue_href = signed_item.assets['B02'].href
+
+            import rioxarray
+            import xarray as xr
+
+            # Open bands as DataArrays at 10m resolution
+            nir = rioxarray.open_rasterio(nir_href).squeeze()
+            red = rioxarray.open_rasterio(red_href).squeeze()
+            green = rioxarray.open_rasterio(green_href).squeeze()
+
+            # Red edge and blue may be at 20m; reproject to match 10m
+            red_edge = rioxarray.open_rasterio(red_edge_href).squeeze()
+            blue = rioxarray.open_rasterio(blue_href).squeeze()
+
+            # Clip to farm area
+            from shapely.geometry import Point
+            point = Point(lon, lat)
+            buffer = point.buffer(buffer_meters / 111320)  # rough degrees
+
+            import geopandas as gpd
+            gdf = gpd.GeoDataFrame(geometry=[buffer], crs="EPSG:4326")
+
+            nir = nir.rio.clip(gdf.geometry, gdf.crs, drop=True)
+            red = red.rio.clip(gdf.geometry, gdf.crs, drop=True)
+            green = green.rio.clip(gdf.geometry, gdf.crs, drop=True)
+
+            # Convert to float
+            nir = nir.astype(float)
+            red = red.astype(float)
+            green = green.astype(float)
+
+            # NDVI
+            ndvi = float(((nir - red) / (nir + red)).mean().values)
+
+            # NDWI
+            ndwi = float(((green - nir) / (green + nir)).mean().values)
+
+            # EVI
+            evi = float((2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue.astype(float).rio.clip(gdf.geometry, gdf.crs, drop=True) + 1)).mean().values)
+
+            # SAVI (L=0.5)
+            savi = float(((nir - red) / (nir + red + 0.5) * 1.5).mean().values)
+
+            # NDRE
+            red_edge = red_edge.astype(float).rio.clip(gdf.geometry, gdf.crs, drop=True)
+            ndre = float(((nir - red_edge) / (nir + red_edge)).mean().values)
+
+            logger.info(f"✓ Calculated REAL vegetation indices via Planetary Computer for ({lat}, {lon}) — NDVI: {ndvi:.4f}")
 
             return {
-                'ndvi': round(base_ndvi, 4),
-                'ndre': round(base_ndvi * 0.85 + random.uniform(-0.05, 0.05), 4),  # Correlated with NDVI
-                'ndwi': round(random.uniform(0.15, 0.35), 4),  # Water content index
-                'evi': round(base_ndvi * 1.1 + random.uniform(-0.1, 0.1), 4),  # Enhanced vegetation index
-                'savi': round(base_ndvi * 0.9 + random.uniform(-0.05, 0.05), 4)  # Soil-adjusted
+                'ndvi': round(ndvi, 4),
+                'ndre': round(ndre, 4),
+                'ndwi': round(ndwi, 4),
+                'evi': round(evi, 4),
+                'savi': round(savi, 4),
             }
+        except ImportError as e:
+            logger.error(f"Missing dependency for Planetary Computer index calculation: {e}. Install rioxarray and planetary-computer.")
+            return {}
         except Exception as e:
             logger.error(f"Error calculating vegetation indices with Planetary Computer: {e}")
             return {}

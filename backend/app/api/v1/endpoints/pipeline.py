@@ -15,6 +15,14 @@ from app.db.database import SessionLocal
 from app.services.pipeline_service import get_pipeline_service, PipelineService
 from app.models.prediction import Prediction as PredictionModel
 from app.models.farm import Farm as FarmModel
+from app.api.v1.endpoints.analytics import (
+    calculate_confidence,
+    calculate_impact_metrics,
+    default_risk_drivers,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -104,25 +112,34 @@ def _run_risk_prediction_task(overwrite: bool = False):
 
     db = SessionLocal()
     try:
-        # Latest satellite record per farm (linked by extra_metadata.farm_id)
+        # Latest satellite record per farm - use direct columns + extra_metadata fallback
         rows = db.execute(
             text(
                 """
-                SELECT farm_id, ndvi, date
+                SELECT farm_id, ndvi, ndre, ndwi, evi, savi, date
                 FROM (
                     SELECT
-                        (extra_metadata->>'farm_id')::int AS farm_id,
+                        COALESCE(
+                            farm_id,
+                            (extra_metadata->>'farm_id')::int
+                        ) AS farm_id,
                         date,
                         COALESCE(
+                            mean_ndvi,
                             NULLIF((extra_metadata->>'ndvi_value')::float, 0),
                             (extra_metadata->>'ndvi_mean')::float
                         ) AS ndvi,
+                        mean_ndre AS ndre,
+                        mean_ndwi AS ndwi,
+                        mean_evi AS evi,
+                        mean_savi AS savi,
                         ROW_NUMBER() OVER (
-                            PARTITION BY (extra_metadata->>'farm_id')::int
+                            PARTITION BY COALESCE(farm_id, (extra_metadata->>'farm_id')::int)
                             ORDER BY date DESC, id DESC
                         ) AS rn
                     FROM satellite_images
-                    WHERE (extra_metadata->>'farm_id') IS NOT NULL
+                    WHERE farm_id IS NOT NULL
+                       OR (extra_metadata->>'farm_id') IS NOT NULL
                 ) t
                 WHERE rn = 1
                 """
@@ -135,7 +152,11 @@ def _run_risk_prediction_task(overwrite: bool = False):
                 continue
             latest_by_farm[int(r[0])] = {
                 "ndvi": r[1],
-                "date": r[2],
+                "ndre": r[2],
+                "ndwi": r[3],
+                "evi": r[4],
+                "savi": r[5],
+                "date": r[6],
             }
 
         if not latest_by_farm:
@@ -164,7 +185,11 @@ def _run_risk_prediction_task(overwrite: bool = False):
                 continue
 
             ndvi = sat.get('ndvi')
-            risk_score = _ndvi_to_risk_score(float(ndvi)) if ndvi is not None else 0.0
+            ndre = sat.get('ndre')
+            ndwi = sat.get('ndwi')
+            evi = sat.get('evi')
+            savi = sat.get('savi')
+            risk_score = _composite_risk_score(ndvi, ndre, ndwi, evi, savi)
 
             # Optional: if overwrite=True, remove existing latest prediction for farm.
             if overwrite:
@@ -174,33 +199,93 @@ def _run_risk_prediction_task(overwrite: bool = False):
                     db.rollback()
                     # If delete fails (FK constraints etc.), fall back to append-only behavior.
 
+            # Calculate ALL intelligence fields
+            rs = float(risk_score)
+            farm_area = float(farm.area or 1.0)
+
+            # Confidence
+            confidence_level, confidence_score = calculate_confidence(
+                rs, has_satellite_data=True, has_weather_data=has_any_weather
+            )
+
+            # Risk drivers
+            risk_drivers = default_risk_drivers(rs)
+
+            # Impact metrics
+            impact_metrics = calculate_impact_metrics(rs, farm_area)
+
+            # Disease risk level
+            if rs >= 70:
+                disease_risk = "high"
+            elif rs >= 40:
+                disease_risk = "moderate"
+            else:
+                disease_risk = "low"
+
+            # Yield loss estimate (% of risk translates to yield loss)
+            yield_loss = round(rs * 0.4, 1)
+
+            # Risk explanation
+            ndvi_val = sat.get('ndvi', 0)
+            if rs >= 70:
+                risk_explanation = (
+                    f"High risk detected for {farm.name or 'farm'}. "
+                    f"NDVI={ndvi_val:.3f} indicates significant vegetation stress. "
+                    f"Primary drivers: declining vegetation health ({risk_drivers.get('ndvi_trend', 0):.0%}), "
+                    f"rainfall deficit ({risk_drivers.get('rainfall_deficit', 0):.0%}). "
+                    f"Estimated yield loss: {yield_loss}%. Immediate action recommended."
+                )
+            elif rs >= 40:
+                risk_explanation = (
+                    f"Moderate risk for {farm.name or 'farm'}. "
+                    f"NDVI={ndvi_val:.3f} shows some vegetation stress. "
+                    f"Monitor closely and prepare preventive measures. "
+                    f"Estimated yield loss: {yield_loss}%."
+                )
+            else:
+                risk_explanation = (
+                    f"Low risk for {farm.name or 'farm'}. "
+                    f"NDVI={ndvi_val:.3f} indicates healthy vegetation. "
+                    f"Continue routine monitoring."
+                )
+
+            # Recommendations based on risk level
+            if rs >= 70:
+                recommendations = [
+                    "Inspect farm immediately for signs of disease or drought",
+                    "Apply preventive fungicide if disease symptoms detected",
+                    "Check and optimize irrigation system",
+                    "Consider emergency fertilizer application for nutrient stress",
+                    "Monitor weather forecast for upcoming rainfall"
+                ]
+            elif rs >= 40:
+                recommendations = [
+                    "Increase monitoring frequency to every 2-3 days",
+                    "Prepare fungicide for preventive application",
+                    "Check soil moisture levels and adjust irrigation",
+                    "Review crop nutrient requirements for growth stage"
+                ]
+            else:
+                recommendations = [
+                    "Continue routine monitoring schedule",
+                    "Maintain current irrigation and fertilization plan",
+                    "Scout for early signs of pest or disease"
+                ]
+
             pred = PredictionModel(
                 farm_id=farm.id,
                 predicted_at=now,
-                risk_score=float(risk_score),
-                time_to_impact=_get_time_to_impact(float(risk_score)),
+                risk_score=rs,
+                yield_loss=yield_loss,
+                disease_risk=disease_risk,
+                time_to_impact=_get_time_to_impact(rs),
+                confidence_level=confidence_level,
+                confidence_score=confidence_score,
+                risk_drivers=risk_drivers,
+                risk_explanation=risk_explanation,
+                recommendations=recommendations,
+                impact_metrics=impact_metrics,
             )
-
-            # Store some deterministic explainability fields so the UI can be fully "real".
-            try:
-                from app.api.v1.endpoints.analytics import (
-                    calculate_confidence,
-                    calculate_impact_metrics,
-                    default_risk_drivers,
-                )
-
-                confidence_level, confidence_score = calculate_confidence(
-                    float(risk_score),
-                    has_satellite_data=True,
-                    has_weather_data=has_any_weather,
-                )
-                pred.confidence_level = confidence_level
-                pred.confidence_score = confidence_score
-                pred.risk_drivers = default_risk_drivers(float(risk_score))
-                pred.impact_metrics = calculate_impact_metrics(float(risk_score), float(farm.area or 1.0))
-            except Exception:
-                # Best-effort only; prediction itself is still valid.
-                pass
 
             db.add(pred)
             created += 1
@@ -222,6 +307,96 @@ def _run_risk_prediction_task(overwrite: bool = False):
     finally:
         _risk_prediction_status['is_running'] = False
         db.close()
+
+
+@router.post("/risk-predictions/backfill")
+def backfill_null_predictions(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Backfill existing predictions that have null intelligence fields."""
+    null_preds = db.query(PredictionModel).filter(
+        PredictionModel.confidence_level.is_(None)
+    ).all()
+
+    if not null_preds:
+        return {"status": "no_nulls", "message": "No predictions with null fields found"}
+
+    # Check weather availability
+    has_any_weather = False
+    try:
+        has_any_weather = db.execute(text("SELECT 1 FROM weather_records LIMIT 1")).first() is not None
+    except Exception:
+        pass
+
+    # Load farms for area info
+    farms_map = {}
+    farms = db.query(FarmModel).all()
+    for f in farms:
+        farms_map[f.id] = f
+
+    updated = 0
+    for pred in null_preds:
+        rs = float(pred.risk_score or 0)
+        farm = farms_map.get(pred.farm_id)
+        farm_area = float(farm.area or 1.0) if farm else 1.0
+        farm_name = farm.name if farm else "farm"
+
+        confidence_level, confidence_score = calculate_confidence(
+            rs, has_satellite_data=True, has_weather_data=has_any_weather
+        )
+
+        pred.confidence_level = confidence_level
+        pred.confidence_score = confidence_score
+        pred.risk_drivers = default_risk_drivers(rs)
+        pred.impact_metrics = calculate_impact_metrics(rs, farm_area)
+        pred.yield_loss = round(rs * 0.4, 1)
+        pred.disease_risk = "high" if rs >= 70 else "moderate" if rs >= 40 else "low"
+        pred.time_to_impact = pred.time_to_impact or _get_time_to_impact(rs)
+
+        if rs >= 70:
+            pred.risk_explanation = (
+                f"High risk detected for {farm_name}. "
+                f"Significant vegetation stress identified. "
+                f"Estimated yield loss: {pred.yield_loss}%. Immediate action recommended."
+            )
+            pred.recommendations = [
+                "Inspect farm immediately for signs of disease or drought",
+                "Apply preventive fungicide if disease symptoms detected",
+                "Check and optimize irrigation system",
+                "Consider emergency fertilizer application for nutrient stress",
+                "Monitor weather forecast for upcoming rainfall"
+            ]
+        elif rs >= 40:
+            pred.risk_explanation = (
+                f"Moderate risk for {farm_name}. "
+                f"Some vegetation stress detected. "
+                f"Monitor closely and prepare preventive measures. "
+                f"Estimated yield loss: {pred.yield_loss}%."
+            )
+            pred.recommendations = [
+                "Increase monitoring frequency to every 2-3 days",
+                "Prepare fungicide for preventive application",
+                "Check soil moisture levels and adjust irrigation",
+                "Review crop nutrient requirements for growth stage"
+            ]
+        else:
+            pred.risk_explanation = (
+                f"Low risk for {farm_name}. "
+                f"Healthy vegetation detected. "
+                f"Continue routine monitoring."
+            )
+            pred.recommendations = [
+                "Continue routine monitoring schedule",
+                "Maintain current irrigation and fertilization plan",
+                "Scout for early signs of pest or disease"
+            ]
+
+        updated += 1
+
+    db.commit()
+    return {
+        "status": "completed",
+        "updated_predictions": updated,
+        "message": f"Successfully backfilled {updated} predictions with full intelligence fields"
+    }
 
 
 @router.get("/risk-predictions/status")
@@ -437,6 +612,77 @@ def _ndvi_to_risk_score(ndvi: float) -> float:
         return 85.0
     else:
         return 95.0
+
+
+def _index_to_risk(value, thresholds):
+    """Convert a vegetation index value to a risk score using thresholds.
+    thresholds: list of (min_value, risk_score) pairs, sorted by min_value desc.
+    """
+    if value is None:
+        return None
+    for min_val, risk in thresholds:
+        if value >= min_val:
+            return risk
+    return thresholds[-1][1] if thresholds else 95.0
+
+
+def _composite_risk_score(ndvi, ndre, ndwi, evi, savi) -> float:
+    """Calculate composite risk score from ALL vegetation indices.
+
+    Weights: NDVI (30%), NDRE (20%), NDWI (20%), EVI (15%), SAVI (15%)
+    Each index is converted to a risk score (0-100), then weighted.
+    """
+    scores = []
+    weights = []
+
+    # NDVI (30%) - Primary vegetation health
+    ndvi_risk = _index_to_risk(ndvi, [
+        (0.7, 10), (0.6, 25), (0.5, 40), (0.4, 55), (0.3, 70), (0.2, 85), (0.0, 95)
+    ])
+    if ndvi_risk is not None:
+        scores.append(ndvi_risk)
+        weights.append(0.30)
+
+    # NDRE (20%) - Chlorophyll/nitrogen
+    ndre_risk = _index_to_risk(ndre, [
+        (0.5, 10), (0.4, 30), (0.3, 50), (0.2, 70), (0.0, 90)
+    ])
+    if ndre_risk is not None:
+        scores.append(ndre_risk)
+        weights.append(0.20)
+
+    # NDWI (20%) - Water content
+    ndwi_risk = _index_to_risk(ndwi, [
+        (0.3, 10), (0.2, 30), (0.1, 50), (0.0, 70), (-1.0, 90)
+    ])
+    if ndwi_risk is not None:
+        scores.append(ndwi_risk)
+        weights.append(0.20)
+
+    # EVI (15%) - Enhanced vegetation
+    evi_risk = _index_to_risk(evi, [
+        (0.6, 10), (0.4, 30), (0.3, 50), (0.2, 70), (0.0, 90)
+    ])
+    if evi_risk is not None:
+        scores.append(evi_risk)
+        weights.append(0.15)
+
+    # SAVI (15%) - Soil-adjusted
+    savi_risk = _index_to_risk(savi, [
+        (0.5, 10), (0.4, 30), (0.3, 50), (0.2, 70), (0.0, 90)
+    ])
+    if savi_risk is not None:
+        scores.append(savi_risk)
+        weights.append(0.15)
+
+    if not scores:
+        return 50.0  # Default medium risk if no data
+
+    # Normalize weights and calculate
+    total_weight = sum(weights)
+    composite = sum(s * w for s, w in zip(scores, weights)) / total_weight
+
+    return round(composite, 1)
 
 
 def _get_recommendation(risk_level: str) -> str:

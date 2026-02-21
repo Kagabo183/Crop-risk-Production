@@ -83,6 +83,82 @@ def detect_province_from_coordinates(latitude: float, longitude: float) -> Optio
     return closest_province
 
 
+def detect_location_details(latitude: float, longitude: float) -> Dict[str, Optional[str]]:
+    """
+    Detect location details (Province, District) from coordinates using OpenStreetMap (Nominatim).
+    Falls back to heuristic province detection if API fails.
+
+    Args:
+        latitude: Latitude
+        longitude: Longitude
+
+    Returns:
+        Dictionary with 'province' and 'district' keys
+    """
+    import requests
+    import time
+
+    # Default result
+    result = {
+        'province': None,
+        'district': None,
+        'sector': None,
+        'source': 'heuristic'
+    }
+
+    # 1. Try OpenStreetMap Nominatim API (Reverse Geocoding)
+    try:
+        # User-Agent is required by Nominatim policy
+        headers = {'User-Agent': 'CropRiskPlatform/1.0 (agri-support@rwanda.gov.rw)'}
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={latitude}&lon={longitude}&zoom=14"
+        
+        response = requests.get(url, headers=headers, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            address = data.get('address', {})
+            
+            # Extract details
+            # Nominatim mapping for Rwanda:
+            # - state/region -> Province
+            # - county/district -> District
+            # - town/village -> Sector (sometimes)
+            
+            if 'state' in address:
+                result['province'] = address['state'].replace(' Province', '')
+            elif 'region' in address:
+                result['province'] = address['region'].replace(' Province', '')
+                
+            # Handle standard Rwanda province names (North, South, East, West, Kigali)
+            # Also handle Kinyarwanda names returned by Nominatim
+            if result['province']:
+                prov = result['province']
+                if 'Northern' in prov or 'Nord' in prov or 'Amajyaruguru' in prov: result['province'] = 'Northern'
+                elif 'Southern' in prov or 'Sud' in prov or 'Amajyepfo' in prov: result['province'] = 'Southern'
+                elif 'Eastern' in prov or 'Est' in prov or 'Iburasirazuba' in prov: result['province'] = 'Eastern'
+                elif 'Western' in prov or 'Ouest' in prov or 'Iburengerazuba' in prov: result['province'] = 'Western'
+                elif 'Kigali' in prov or 'Umujyi wa Kigali' in prov: result['province'] = 'Kigali'
+
+            if 'county' in address:
+                result['district'] = address['county'].replace(' District', '')
+            elif 'district' in address: # Sometimes it returns 'district' key
+                result['district'] = address['district'].replace(' District', '')
+
+            if result['province'] or result['district']:
+                result['source'] = 'openstreetmap'
+                return result
+
+    except Exception as e:
+        print(f"Nominatim API error: {e}")
+
+    # 2. Fallback to local heuristic for Province
+    # If we couldn't get data from API, try to guess at least the province
+    if not result['province']:
+        result['province'] = detect_province_from_coordinates(latitude, longitude)
+    
+    return result
+
+
 def validate_boundary_in_rwanda(boundary_geojson: Dict) -> Tuple[bool, Optional[str]]:
     """
     Validate that a polygon boundary is entirely within Rwanda.

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan } from 'lucide-react'
-import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary } from '../api'
+import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan, Footprints } from 'lucide-react'
+import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary, detectLocation } from '../api'
+import WalkMyFarm from '../components/WalkMyFarm'
+import ParcelLookup from '../components/ParcelLookup'
 import { useAuth } from '../context/AuthContext'
 import LOCATIONS from '../data/locations.json'
 
@@ -34,6 +36,10 @@ export default function Farms() {
   const [boundaryLoading, setBoundaryLoading] = useState(false)
   const [boundaryResult, setBoundaryResult] = useState(null)
   const [boundaryError, setBoundaryError] = useState(null)
+
+  // Walk My Farm state
+  const [showWalkMyFarm, setShowWalkMyFarm] = useState(false)
+  const [showParcelLookup, setShowParcelLookup] = useState(false)
 
   const loadData = () => {
     setLoading(true)
@@ -114,12 +120,35 @@ export default function Farms() {
     setGeoLoading(true)
     setGeoError(null)
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
+        const lat = position.coords.latitude
+        const lon = position.coords.longitude
+
         setFormData(prev => ({
           ...prev,
-          latitude: position.coords.latitude.toFixed(6),
-          longitude: position.coords.longitude.toFixed(6),
+          latitude: lat.toFixed(6),
+          longitude: lon.toFixed(6),
         }))
+
+        // Auto-detect location details
+        try {
+          const res = await detectLocation(lat, lon)
+          if (res.data.success) {
+            const { province, district } = res.data
+            setFormData(prev => ({
+              ...prev,
+              province: province || prev.province,
+              district: district || '', // Reset district if not found or set new one
+              sector: '' // Always reset sector as we don't detect it reliably yet
+            }))
+            // Show a small success indicator (reusing geoError for simplicity or just console for now)
+            console.log("Location detected:", res.data.message)
+          }
+        } catch (err) {
+          console.error("Failed to detect location details:", err)
+          // Don't fail the whole operation, just log
+        }
+
         setGeoLoading(false)
       },
       (err) => {
@@ -425,17 +454,39 @@ export default function Farms() {
                   {geoLoading ? 'Getting location...' : '📍 Use My Location'}
                 </button>
                 {editingId && formData.latitude && formData.longitude && (
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={handleAutoDetectBoundary}
-                    disabled={boundaryLoading}
-                    style={{ fontSize: 13, padding: '6px 14px', background: 'var(--primary)', color: 'white' }}
-                    title="Automatically detect farm boundary from satellite imagery (excludes forests)"
-                  >
-                    <Scan size={14} />
-                    {boundaryLoading ? 'Detecting...' : '🛰️ Auto-Detect Boundary'}
-                  </button>
+                  <>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={handleAutoDetectBoundary}
+                      disabled={boundaryLoading}
+                      style={{ fontSize: 13, padding: '6px 14px', background: 'var(--primary)', color: 'white' }}
+                      title="Automatically detect farm boundary from satellite imagery (excludes forests)"
+                    >
+                      <Scan size={14} />
+                      {boundaryLoading ? 'Detecting...' : '🛰️ Auto-Detect Boundary'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={() => setShowWalkMyFarm(!showWalkMyFarm)}
+                      style={{ fontSize: 13, padding: '6px 14px', background: '#f97316', color: 'white', border: 'none' }}
+                      title="Walk around your farm to record the boundary with GPS"
+                    >
+                      <Footprints size={14} />
+                      {showWalkMyFarm ? 'Hide Walk Tool' : '🚶 Walk My Farm'}
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      onClick={() => setShowParcelLookup(true)}
+                      style={{ fontSize: 13, padding: '6px 14px', background: '#6366f1', color: 'white', border: 'none' }}
+                      title="Find your official land parcel boundary by UPI or GPS location"
+                    >
+                      <MapPin size={14} />
+                      📋 Find My Parcel
+                    </button>
+                  </>
                 )}
                 {formData.latitude && formData.longitude && (
                   <span style={{ fontSize: 12, color: 'var(--success)', fontWeight: 500 }}>
@@ -470,6 +521,36 @@ export default function Farms() {
                 <div style={{ marginTop: 12, padding: 10, background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, fontSize: 12, color: '#92400e' }}>
                   ⚠️ {boundaryError}
                 </div>
+              )}
+              {/* Walk My Farm Component */}
+              {showWalkMyFarm && editingId && (
+                <div style={{ marginTop: 16 }}>
+                  <WalkMyFarm
+                    farmId={editingId}
+                    farmLat={parseFloat(formData.latitude)}
+                    farmLon={parseFloat(formData.longitude)}
+                    onSaved={(areaHa) => {
+                      setFormData(prev => ({ ...prev, area: areaHa.toFixed(2) }))
+                      setShowWalkMyFarm(false)
+                      loadData()
+                    }}
+                    onClose={() => setShowWalkMyFarm(false)}
+                  />
+                </div>
+              )}
+              {/* Parcel Lookup Component */}
+              {showParcelLookup && editingId && (
+                <ParcelLookup
+                  farmId={editingId}
+                  farmLat={parseFloat(formData.latitude)}
+                  farmLon={parseFloat(formData.longitude)}
+                  onSaved={(areaHa) => {
+                    setFormData(prev => ({ ...prev, area: areaHa.toFixed(2) }))
+                    setShowParcelLookup(false)
+                    loadData()
+                  }}
+                  onClose={() => setShowParcelLookup(false)}
+                />
               )}
               <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
                 <button className="btn btn-primary" type="submit" disabled={submitting}>

@@ -13,6 +13,7 @@ from app.utils.rwanda_boundary import (
     validate_point_in_rwanda,
     validate_boundary_in_rwanda,
     detect_province_from_coordinates,
+    detect_location_details,
     calculate_area_hectares
 )
 
@@ -437,3 +438,40 @@ def save_farm_boundary(
             status_code=400,
             detail=f"Failed to save boundary: {str(e)}"
         )
+
+
+@router.get("/detect-location")
+def detect_location(
+    latitude: float, 
+    longitude: float,
+    current_user: UserModel = Depends(require_farmer_or_above)
+):
+    """
+    Detect location details (Province, District) from coordinates.
+    Uses OpenStreetMap Nominatim API with a fallback to local heuristic.
+    """
+    
+    # Validate coordinates are in Rwanda first
+    is_valid, error_msg = validate_point_in_rwanda(latitude, longitude)
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Location must be within Rwanda. {error_msg}"
+        )
+        
+    result = detect_location_details(latitude, longitude)
+    
+    if not result['province']:
+        return {
+            "success": False,
+            "message": "Could not detect location details."
+        }
+        
+    return {
+        "success": True,
+        "province": result['province'],
+        "district": result['district'],
+        "sector": result['sector'],
+        "source": result['source'],
+        "message": f"Detected: {result['district']}, {result['province']}"
+    }
