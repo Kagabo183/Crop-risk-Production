@@ -38,3 +38,51 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/api/v1/health")
 def health_check():
     return {"status": "healthy", "service": "crop-risk-backend"}
+
+# Temporary debug endpoint — remove after fixing
+@app.get("/api/v1/debug/db")
+def debug_db():
+    import traceback
+    from sqlalchemy import text, inspect
+    from app.db.database import engine
+    result = {"database_url_prefix": str(engine.url)[:30] + "..."}
+    try:
+        with engine.connect() as conn:
+            result["connection"] = "OK"
+            inspector = inspect(engine)
+            result["tables"] = inspector.get_table_names()
+            if "users" in result["tables"]:
+                cols = inspector.get_columns("users")
+                result["users_columns"] = [c["name"] for c in cols]
+            else:
+                result["users_columns"] = "TABLE NOT FOUND"
+    except Exception as e:
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+    return result
+
+@app.get("/api/v1/debug/register-test")
+def debug_register_test():
+    import traceback
+    from app.db.database import SessionLocal
+    from app.models.user import User as UserModel, UserRole
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    try:
+        db = SessionLocal()
+        new_user = UserModel(
+            email="debugtest@test.com",
+            hashed_password=pwd_context.hash("test1234"),
+            full_name="Debug Test",
+            role=UserRole.farmer,
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        # Clean up
+        db.delete(new_user)
+        db.commit()
+        db.close()
+        return {"status": "OK", "message": "User creation works!"}
+    except Exception as e:
+        return {"status": "FAILED", "error": str(e), "traceback": traceback.format_exc()}
