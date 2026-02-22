@@ -75,6 +75,7 @@ class FarmOut(BaseModel):
     planting_date: Optional[date] = None
     growth_stage: Optional[dict] = None
     owner_id: Optional[int] = None
+    has_boundary: bool = False
 
 
 class FarmCreate(BaseModel):
@@ -119,6 +120,7 @@ def _farm_to_out(farm: FarmModel) -> dict:
         "planting_date": farm.planting_date,
         "growth_stage": compute_growth_stage(farm.crop_type, farm.planting_date),
         "owner_id": farm.owner_id,
+        "has_boundary": farm.boundary is not None,
     }
 
 

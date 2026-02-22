@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { formatDate } from '../utils/formatDate'
 import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, ReferenceLine,
@@ -244,7 +245,7 @@ export default function SatelliteData() {
             <div className="stat-info">
               <h4>Last Updated</h4>
               <div className="stat-value" style={{ fontSize: 16 }}>
-                {farmSat.ndvi_date || '—'}
+                {formatDate(farmSat.ndvi_date)}
               </div>
               {farmSat.cloud_cover != null && (
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Cloud: {farmSat.cloud_cover}%</div>
@@ -262,7 +263,7 @@ export default function SatelliteData() {
         </div>
         <div className="card-body">
           {history.length > 0 ? (
-            <ResponsiveContainer width="100%" height={350}>
+            <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={history}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="date" fontSize={11} />
@@ -312,7 +313,7 @@ export default function SatelliteData() {
                     <td style={{ fontWeight: 600 }}>{s.ndvi?.toFixed(3) || '—'}</td>
                     <td><span className={`badge ${s.ndvi_status || 'info'}`}>{s.ndvi_status || 'Unknown'}</span></td>
                     <td>{s.data_source || '—'}</td>
-                    <td>{s.ndvi_date || '—'}</td>
+                    <td>{formatDate(s.ndvi_date)}</td>
                     <td>{s.cloud_cover != null ? `${s.cloud_cover}%` : '—'}</td>
                   </tr>
                 ))}

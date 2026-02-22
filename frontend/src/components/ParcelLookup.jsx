@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { searchParcels, findParcelByLocation, saveFarmBoundary } from '../api'
 import { Search, MapPin, Check, X, Loader2, Navigation, Redo } from 'lucide-react'
+import { getCurrentPosition } from '../utils/native'
 
 /**
  * ParcelLookup – find official LAIS cadastral parcel by UPI or GPS location.
@@ -180,45 +181,29 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
 
     // Find by GPS location
     const handleGpsSearch = async () => {
-        if (!navigator.geolocation) {
-            setError('GPS is not supported by your browser')
-            return
-        }
-
         setGpsSearching(true)
         setError(null)
         setParcels([])
         setSelectedParcel(null)
 
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const { latitude, longitude } = position.coords
-                try {
-                    const res = await findParcelByLocation(latitude, longitude, 100)
-                    const data = res.data
-                    if (data.length === 0) {
-                        setError('No registered parcels found at your location. Try searching by UPI instead.')
-                    } else {
-                        setParcels(data)
-                        drawParcels(data)
-                        if (data.length === 1) {
-                            selectParcel(data[0])
-                        }
-                    }
-                } catch (err) {
-                    setError(err.response?.data?.detail || 'Location search failed.')
-                } finally {
-                    setGpsSearching(false)
+        try {
+            const { latitude, longitude } = await getCurrentPosition()
+            const res = await findParcelByLocation(latitude, longitude, 100)
+            const data = res.data
+            if (data.length === 0) {
+                setError('No registered parcels found at your location. Try searching by UPI instead.')
+            } else {
+                setParcels(data)
+                drawParcels(data)
+                if (data.length === 1) {
+                    selectParcel(data[0])
                 }
-            },
-            (err) => {
-                setGpsSearching(false)
-                if (err.code === 1) setError('Location access denied. Please allow GPS.')
-                else if (err.code === 2) setError('GPS unavailable. Make sure location services are ON.')
-                else setError('GPS timed out. Try again.')
-            },
-            { enableHighAccuracy: true, timeout: 15000 }
-        )
+            }
+        } catch (err) {
+            setError(err.response?.data?.detail || err.message || 'Location search failed.')
+        } finally {
+            setGpsSearching(false)
+        }
     }
 
     // Save selected parcel boundary to farm

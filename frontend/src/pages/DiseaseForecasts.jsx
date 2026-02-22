@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, BarChart, Bar, Cell,
+  ResponsiveContainer,
 } from 'recharts'
+import { formatDate } from '../utils/formatDate'
 import { TrendingUp, AlertTriangle, Shield } from 'lucide-react'
 import {
   getFarms, getDiseases, getDiseaseForecasts, getWeeklyForecast,
@@ -149,19 +150,22 @@ export default function DiseaseForecasts() {
             <div className="card" style={{ marginBottom: 20 }}>
               <div className="card-header"><h3>Daily Risk Forecast</h3></div>
               <div className="card-body">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={forecast}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="date" fontSize={11} />
-                    <YAxis domain={[0, 100]} fontSize={12} />
-                    <Tooltip />
-                    <Bar dataKey="risk_score" name="Risk Score" radius={[4, 4, 0, 0]}>
-                      {forecast.map((entry, i) => (
-                        <Cell key={i} fill={RISK_COLORS[entry.risk_level] || '#6b7280'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {forecast.map((entry, i) => (
+                    <div key={i}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 1 }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{formatDate(entry.date)}</span>
+                        <span style={{ fontWeight: 600 }}>{entry.risk_score}%</span>
+                      </div>
+                      <div className="confidence-bar" style={{ height: 6 }}>
+                        <div className="confidence-fill" style={{
+                          width: `${Math.min(entry.risk_score, 100)}%`,
+                          background: RISK_COLORS[entry.risk_level] || '#6b7280',
+                        }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -228,7 +232,7 @@ export default function DiseaseForecasts() {
                       <tbody>
                         {predictions.slice(0, 10).map((p, i) => (
                           <tr key={i}>
-                            <td>{p.prediction_date || '—'}</td>
+                            <td>{formatDate(p.prediction_date)}</td>
                             <td style={{ fontWeight: 600 }}>{p.risk_score?.toFixed(1) ?? '—'}</td>
                             <td><span className={`badge ${p.risk_level || 'info'}`}>{p.risk_level || '—'}</span></td>
                           </tr>

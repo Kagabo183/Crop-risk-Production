@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Navigation, Square, Save, RotateCcw, X, MapPin, Clock, Ruler } from 'lucide-react'
 import { saveFarmBoundary } from '../api'
+import { getCurrentPosition, watchPosition } from '../utils/native'
 
 /**
  * Walk My Farm — GPS Boundary Tracking Component
@@ -105,15 +106,9 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
         }
 
         // Center map on farmer's REAL GPS position (where they are right now)
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    map.setView([pos.coords.latitude, pos.coords.longitude], 18)
-                },
-                () => { /* keep farm center if GPS fails */ },
-                { enableHighAccuracy: true, timeout: 5000 }
-            )
-        }
+        getCurrentPosition({ timeout: 5000 })
+            .then(({ latitude, longitude }) => map.setView([latitude, longitude], 18))
+            .catch(() => { /* keep farm center if GPS fails */ })
 
         mapInstance.current = map
         return () => {
@@ -208,11 +203,6 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
 
     // Start GPS tracking
     const startWalking = useCallback(() => {
-        if (!navigator.geolocation) {
-            setError('GPS is not supported by your browser')
-            return
-        }
-
         setError(null)
         setPoints([])
         setPhase('walking')
@@ -225,9 +215,8 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
             polygonRef.current = null
         }
 
-        watchIdRef.current = navigator.geolocation.watchPosition(
-            (position) => {
-                const { latitude, longitude, accuracy: acc } = position.coords
+        watchIdRef.current = watchPosition(
+            ({ latitude, longitude, accuracy: acc }) => {
                 setAccuracy(acc)
 
                 // Reject readings with poor accuracy — they cause fake distance
@@ -244,27 +233,15 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                     return [...prev, { lat: latitude, lon: longitude, acc, time: Date.now() }]
                 })
             },
-            (err) => {
-                if (err.code === 1) {
-                    setError('Location access denied. Please allow GPS in your browser settings.')
-                } else if (err.code === 2) {
-                    setError('GPS unavailable. Make sure location services are ON.')
-                } else {
-                    setError('GPS timed out. Try moving to an open area.')
-                }
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 15000,
-                maximumAge: 0,
-            }
+            (err) => setError(err.message),
+            { maximumAge: 0 }
         )
     }, [])
 
     // Stop GPS tracking
     const stopWalking = useCallback(() => {
-        if (watchIdRef.current !== null) {
-            navigator.geolocation.clearWatch(watchIdRef.current)
+        if (watchIdRef.current) {
+            watchIdRef.current.clear()
             watchIdRef.current = null
         }
         if (timerRef.current) clearInterval(timerRef.current)
@@ -273,8 +250,8 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
 
     // Reset to start over
     const resetWalk = useCallback(() => {
-        if (watchIdRef.current !== null) {
-            navigator.geolocation.clearWatch(watchIdRef.current)
+        if (watchIdRef.current) {
+            watchIdRef.current.clear()
             watchIdRef.current = null
         }
         if (timerRef.current) clearInterval(timerRef.current)
@@ -330,9 +307,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            if (watchIdRef.current !== null) {
-                navigator.geolocation.clearWatch(watchIdRef.current)
-            }
+            if (watchIdRef.current) watchIdRef.current.clear()
             if (timerRef.current) clearInterval(timerRef.current)
         }
     }, [])

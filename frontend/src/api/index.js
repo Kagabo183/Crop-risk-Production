@@ -1,6 +1,10 @@
 import axios from 'axios'
+import { Capacitor } from '@capacitor/core'
 
-const API_BASE = '/api/v1'
+// On native (Android/iOS), use 10.0.2.2 (emulator) or localhost (adb reverse) since there's no Vite proxy
+const API_BASE = Capacitor.isNativePlatform()
+  ? 'http://localhost:8000/api/v1'
+  : '/api/v1'
 
 const api = axios.create({
   baseURL: API_BASE,

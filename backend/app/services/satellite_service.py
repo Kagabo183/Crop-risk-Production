@@ -105,14 +105,15 @@ class SatelliteDataService:
                 .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', max_cloud_cover))
                 .sort('system:time_start', False))
             
-            # Get collection info
-            collection_list = collection.toList(collection.size())
-            size = collection_list.size().getInfo()
-            
+            # Get collection size first to avoid toList(0) error
+            size = collection.size().getInfo()
+
             if size == 0:
                 logger.warning(f"No Sentinel-2 imagery found for location ({lat}, {lon})")
                 return []
-            
+
+            collection_list = collection.toList(min(size, 10))
+
             imagery_list = []
             for i in range(min(size, 10)):  # Limit to 10 most recent images
                 image = ee.Image(collection_list.get(i))
@@ -443,12 +444,14 @@ class SatelliteDataService:
                 .filter(ee.Filter.lt('CLOUD_COVER', max_cloud_cover))
                 .sort('system:time_start', False))
             
-            collection_list = collection.toList(collection.size())
-            size = collection_list.size().getInfo()
-            
+            # Get collection size first to avoid toList(0) error
+            size = collection.size().getInfo()
+
             if size == 0:
                 return []
-            
+
+            collection_list = collection.toList(min(size, 5))
+
             imagery_list = []
             for i in range(min(size, 5)):
                 image = ee.Image(collection_list.get(i))
@@ -497,18 +500,18 @@ class SatelliteDataService:
             logger.error(f"Farm {farm_id} has no coordinates")
             return []
         
-        # Fetch imagery
+        # Fetch imagery — try requested range first, then widen to 90 days
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days_back)
-        
+
         # Try Sentinel-2 first
         imagery = self.fetch_sentinel2_imagery(
-            farm.latitude, 
-            farm.longitude, 
-            start_date, 
+            farm.latitude,
+            farm.longitude,
+            start_date,
             end_date
         )
-        
+
         # Fall back to Landsat if no Sentinel-2 data
         if not imagery and self.gee_initialized:
             logger.info("No Sentinel-2 data, trying Landsat")
@@ -518,7 +521,19 @@ class SatelliteDataService:
                 start_date,
                 end_date
             )
-        
+
+        # If still nothing, widen search to 90 days
+        if not imagery and days_back < 90:
+            logger.info(f"No imagery in {days_back} days, expanding to 90 days")
+            start_date = end_date - timedelta(days=90)
+            imagery = self.fetch_sentinel2_imagery(
+                farm.latitude, farm.longitude, start_date, end_date
+            )
+            if not imagery and self.gee_initialized:
+                imagery = self.fetch_landsat_imagery(
+                    farm.latitude, farm.longitude, start_date, end_date
+                )
+
         if not imagery:
             logger.warning(f"No satellite imagery found for farm {farm_id}")
             return []

@@ -1,8 +1,4 @@
 import { useState, useEffect } from 'react'
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
-} from 'recharts'
 import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
 import { getEarlyWarnings, fetchWeatherAll } from '../api'
 
@@ -50,148 +46,107 @@ export default function EarlyWarning() {
   return (
     <>
       {/* Header + Actions */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+      <div className="card">
+        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: 1 }}>
-            <h3 style={{ margin: 0 }}>Early Warning System</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-              Weather-disease correlation + NDVI anomaly detection + growth stage susceptibility
+            <h3 style={{ margin: 0, fontSize: 14 }}>Early Warning System</h3>
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-secondary)' }}>
+              Weather + NDVI anomaly + growth stage analysis
             </p>
           </div>
-          <button className="btn btn-primary" onClick={handleFetchWeather} disabled={fetching}>
-            <CloudRain size={16} />
-            {fetching ? 'Fetching weather...' : 'Update Weather Data'}
+          <button className="btn btn-sm btn-primary" onClick={handleFetchWeather} disabled={fetching}>
+            <CloudRain size={14} />
+            {fetching ? 'Fetching...' : 'Weather'}
           </button>
-          <button className="btn btn-secondary" onClick={load}>
-            <RefreshCw size={16} /> Refresh
+          <button className="btn btn-sm btn-secondary" onClick={load}>
+            <RefreshCw size={14} />
           </button>
         </div>
       </div>
 
-      {error && <div className="error-box" style={{ marginBottom: 20 }}><AlertTriangle size={18} /> {error}</div>}
+      {error && <div className="error-box" style={{ marginBottom: 10 }}><AlertTriangle size={14} /> {error}</div>}
 
       {/* Summary Cards */}
       <div className="stats-grid">
         {['critical', 'high', 'moderate', 'low'].map(level => (
           <div className="stat-card" key={level}>
             <div className="stat-icon" style={{ background: LEVEL_COLORS[level] + '20', color: LEVEL_COLORS[level] }}>
-              <Shield size={22} />
+              <Shield size={16} />
             </div>
             <div className="stat-info">
               <h4>{LEVEL_LABELS[level]}</h4>
               <div className="stat-value">{summary[level] || 0}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>farms</div>
             </div>
           </div>
         ))}
       </div>
 
       {/* Risk Chart */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-header"><h3>Farm Risk Scores</h3></div>
+      <div className="card">
+        <div className="card-header"><h3>Risk Scores</h3></div>
         <div className="card-body">
           {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" fontSize={11} angle={-20} textAnchor="end" height={60} />
-                <YAxis domain={[0, 100]} fontSize={12} />
-                <Tooltip formatter={(v) => [`${v}%`, 'Risk Score']} />
-                <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, i) => (
-                    <Cell key={i} fill={LEVEL_COLORS[entry.level]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {chartData.map((entry, i) => (
+                <div key={i}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 1 }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>{entry.name}</span>
+                    <span style={{ fontWeight: 600 }}>{entry.score}%</span>
+                  </div>
+                  <div className="confidence-bar" style={{ height: 6 }}>
+                    <div className="confidence-fill" style={{
+                      width: `${Math.min(entry.score, 100)}%`,
+                      background: LEVEL_COLORS[entry.level] || '#6b7280',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="empty-state"><Shield size={40} /><h3>No alert data</h3></div>
+            <div className="empty-state" style={{ padding: '20px 12px' }}><Shield size={28} /><h3>No alert data</h3></div>
           )}
         </div>
       </div>
 
       {/* Alert Cards */}
       <div className="card">
-        <div className="card-header"><h3>Farm Alerts ({alerts.length})</h3></div>
+        <div className="card-header"><h3>Alerts ({alerts.length})</h3></div>
         <div className="card-body">
           {alerts.map(a => (
-            <div
-              key={a.farm_id}
-              style={{
-                padding: 16,
-                marginBottom: 12,
-                borderRadius: 8,
-                border: `1px solid ${LEVEL_COLORS[a.alert_level]}40`,
-                background: `${LEVEL_COLORS[a.alert_level]}08`,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div>
-                  <strong>{a.farm_name || `Farm ${a.farm_id}`}</strong>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 8 }}>
-                    {a.location} | {a.crop_type || 'unknown crop'}
-                  </span>
+            <div key={a.farm_id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ fontSize: 13 }}>{a.farm_name || `Farm ${a.farm_id}`}</strong>
+                  <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 6 }}>{a.crop_type}</span>
                 </div>
                 <span className={`badge ${a.alert_level === 'low' ? 'healthy' : a.alert_level}`}>
-                  {a.alert_level.toUpperCase()} — {a.combined_score}%
+                  {a.alert_level} {a.combined_score}%
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13, marginBottom: 8 }}>
-                {/* NDVI Anomaly */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ color: a.ndvi_anomaly?.detected ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
-                    NDVI: {a.ndvi_anomaly?.trend}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, marginBottom: 4 }}>
+                <span style={{ color: a.ndvi_anomaly?.detected ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
+                  NDVI: {a.ndvi_anomaly?.trend}
+                  {a.ndvi_anomaly?.detected && ` (-${a.ndvi_anomaly.drop_pct}%)`}
+                </span>
+                <span>Disease: <strong>{a.disease_risk?.overall_risk}%</strong> ({a.disease_risk?.primary_threat})</span>
+                {a.growth_stage?.stage && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Sprout size={11} /> {a.growth_stage.stage}
                   </span>
-                  {a.ndvi_anomaly?.detected && (
-                    <span style={{ color: 'var(--danger)', fontSize: 12 }}>
-                      ({a.ndvi_anomaly.drop_pct}% drop)
-                    </span>
-                  )}
-                </div>
-                {/* Disease Risk */}
-                <div>
-                  Disease risk: <strong>{a.disease_risk?.overall_risk}%</strong>
-                  <span style={{ fontSize: 12, marginLeft: 4, color: 'var(--text-secondary)' }}>
-                    ({a.disease_risk?.primary_threat})
-                  </span>
-                </div>
-                {/* Growth Stage */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Sprout size={14} />
-                  {a.growth_stage?.stage}
-                  {a.growth_stage?.days_after_planting != null && (
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      (day {a.growth_stage.days_after_planting})
-                    </span>
-                  )}
-                </div>
-                {/* Action Days */}
+                )}
                 {a.action_days_min && a.action_days_max && (
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 10px',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    background: a.action_days_min <= 3 ? '#dc262620' : '#d9770620',
-                    color: a.action_days_min <= 3 ? '#dc2626' : '#d97706',
-                    border: `1px solid ${a.action_days_min <= 3 ? '#dc262640' : '#d9770640'}`,
-                  }}>
-                    <Clock size={12} />
-                    Act within {a.action_days_min}-{a.action_days_max} days
-                  </div>
+                  <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 10, fontWeight: 600, background: a.action_days_min <= 3 ? '#dc262618' : '#d9770618', color: a.action_days_min <= 3 ? '#dc2626' : '#d97706' }}>
+                    <Clock size={10} style={{ verticalAlign: -1 }} /> {a.action_days_min}-{a.action_days_max}d
+                  </span>
                 )}
               </div>
 
-              {/* Recommendations */}
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                {a.recommendations?.map((r, i) => (
-                  <div key={i} style={{ marginBottom: 2 }}>→ {r}</div>
-                ))}
-              </div>
+              {a.recommendations?.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                  {a.recommendations.slice(0, 2).map((r, i) => <div key={i}>→ {r}</div>)}
+                </div>
+              )}
             </div>
           ))}
         </div>

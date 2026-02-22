@@ -1,0 +1,3 @@
+﻿Could not find a required file.
+  Name: index.html
+  Searched in: C:\Users\Riziki\crop-risk-backend\frontend\public

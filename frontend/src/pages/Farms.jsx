@@ -1,14 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan, Footprints } from 'lucide-react'
-import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary, detectLocation } from '../api'
+import { formatDate } from '../utils/formatDate'
+import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan, Footprints, Search } from 'lucide-react'
+import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary, detectLocation, searchParcels } from '../api'
 import WalkMyFarm from '../components/WalkMyFarm'
 import ParcelLookup from '../components/ParcelLookup'
 import { useAuth } from '../context/AuthContext'
 import LOCATIONS from '../data/locations.json'
+import { getCurrentPosition } from '../utils/native'
 
 const emptyForm = {
-  name: '', district: '', sector: '', province: '', crop_type: '',
+  name: '', district: '', sector: '', cell: '', village: '', province: '', crop_type: '',
   area: '', latitude: '', longitude: '',
+}
+
+// Map parcel DB province names to LOCATIONS.json dropdown values
+const PROVINCE_MAP = {
+  'Northern': 'North',
+  'Southern': 'South',
+  'Eastern': 'East',
+  'Western': 'West',
+  'Kigali City': 'Kigali',
+  'North': 'North',
+  'South': 'South',
+  'East': 'East',
+  'West': 'West',
+  'Kigali': 'Kigali',
 }
 
 export default function Farms() {
@@ -41,6 +57,13 @@ export default function Farms() {
   const [showWalkMyFarm, setShowWalkMyFarm] = useState(false)
   const [showParcelLookup, setShowParcelLookup] = useState(false)
 
+  // UPI search state
+  const [upiQuery, setUpiQuery] = useState('')
+  const [upiSearching, setUpiSearching] = useState(false)
+  const [upiResults, setUpiResults] = useState([])
+  const [upiError, setUpiError] = useState(null)
+  const [selectedParcelBoundary, setSelectedParcelBoundary] = useState(null)
+
   const loadData = () => {
     setLoading(true)
     Promise.allSettled([getFarms(), getFarmSatellite()])
@@ -57,28 +80,79 @@ export default function Farms() {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))
   }
 
+  // Search parcel by UPI and auto-fill form
+  const handleUpiSearch = async () => {
+    if (!upiQuery.trim()) return
+    setUpiSearching(true)
+    setUpiError(null)
+    setUpiResults([])
+    try {
+      const res = await searchParcels(upiQuery.trim(), 10)
+      if (res.data.length === 0) {
+        setUpiError('No parcel found for this UPI.')
+      } else if (res.data.length === 1) {
+        applyParcelToForm(res.data[0])
+      } else {
+        setUpiResults(res.data)
+      }
+    } catch (err) {
+      setUpiError(err.response?.data?.detail || 'UPI search failed.')
+    }
+    setUpiSearching(false)
+  }
+
+  // Auto-fill form from a parcel
+  const applyParcelToForm = (parcel) => {
+    // Map parcel province name to LOCATIONS.json dropdown value
+    const mappedProvince = PROVINCE_MAP[parcel.province] || parcel.province || ''
+    setFormData(prev => ({
+      ...prev,
+      name: prev.name || `Farm ${parcel.upi}`,
+      province: mappedProvince || prev.province,
+      district: parcel.district || prev.district,
+      sector: parcel.sector || prev.sector,
+      cell: parcel.cell || prev.cell,
+      village: parcel.village || prev.village,
+      latitude: parcel.centroid_lat ? String(parcel.centroid_lat.toFixed(6)) : prev.latitude,
+      longitude: parcel.centroid_lon ? String(parcel.centroid_lon.toFixed(6)) : prev.longitude,
+      area: parcel.area_hectares ? String(parcel.area_hectares) : prev.area,
+    }))
+    setSelectedParcelBoundary(parcel.boundary_geojson || null)
+    setUpiResults([])
+    setUpiError(null)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
+      // Build location string with all available detail
+      const locationParts = [formData.district, formData.sector, formData.cell, formData.village].filter(Boolean)
       const payload = {
         name: formData.name,
-        location: formData.sector ? `${formData.district} - ${formData.sector}` : formData.district,
+        location: locationParts.join(' - '),
         province: formData.province || null,
         crop_type: formData.crop_type || null,
         area: formData.area ? parseFloat(formData.area) : null,
         latitude: formData.latitude ? parseFloat(formData.latitude) : null,
         longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        boundary: selectedParcelBoundary || undefined,
       }
       if (editingId) {
         await updateFarm(editingId, payload)
       } else {
-        await createFarm(payload)
+        const res = await createFarm(payload)
+        // If we have a parcel boundary, also save it to the new farm
+        if (selectedParcelBoundary && res.data?.id) {
+          try { await saveFarmBoundary(res.data.id, selectedParcelBoundary) } catch (e) { /* non-critical */ }
+        }
       }
       setShowForm(false)
       setEditingId(null)
       setFormData(emptyForm)
+      setSelectedParcelBoundary(null)
+      setUpiQuery('')
       loadData()
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save farm')
@@ -87,11 +161,14 @@ export default function Farms() {
   }
 
   const handleEdit = (farm) => {
-    const [dist, sect] = (farm.location || '').split(' - ')
+    const parts = (farm.location || '').split(' - ')
+    const [dist, sect, cel, vil] = [parts[0] || '', parts[1] || '', parts[2] || '', parts[3] || '']
     setFormData({
       name: farm.name || '',
-      district: dist || '',
-      sector: sect || '',
+      district: dist,
+      sector: sect,
+      cell: cel,
+      village: vil,
       province: farm.province || '',
       crop_type: farm.crop_type || '',
       area: farm.area != null ? String(farm.area) : '',
@@ -112,55 +189,36 @@ export default function Farms() {
     }
   }
 
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      setGeoError('Geolocation is not supported by your browser')
-      return
-    }
+  const handleGetLocation = async () => {
     setGeoLoading(true)
     setGeoError(null)
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude
-        const lon = position.coords.longitude
+    try {
+      const { latitude: lat, longitude: lon } = await getCurrentPosition()
+      setFormData(prev => ({
+        ...prev,
+        latitude: lat.toFixed(6),
+        longitude: lon.toFixed(6),
+      }))
 
-        setFormData(prev => ({
-          ...prev,
-          latitude: lat.toFixed(6),
-          longitude: lon.toFixed(6),
-        }))
-
-        // Auto-detect location details
-        try {
-          const res = await detectLocation(lat, lon)
-          if (res.data.success) {
-            const { province, district } = res.data
-            setFormData(prev => ({
-              ...prev,
-              province: province || prev.province,
-              district: district || '', // Reset district if not found or set new one
-              sector: '' // Always reset sector as we don't detect it reliably yet
-            }))
-            // Show a small success indicator (reusing geoError for simplicity or just console for now)
-            console.log("Location detected:", res.data.message)
-          }
-        } catch (err) {
-          console.error("Failed to detect location details:", err)
-          // Don't fail the whole operation, just log
+      // Auto-detect location details
+      try {
+        const res = await detectLocation(lat, lon)
+        if (res.data.success) {
+          const { province, district } = res.data
+          setFormData(prev => ({
+            ...prev,
+            province: province || prev.province,
+            district: district || '',
+            sector: '',
+          }))
         }
-
-        setGeoLoading(false)
-      },
-      (err) => {
-        setGeoError(
-          err.code === 1 ? 'Location access denied. Please allow location access in your browser.' :
-            err.code === 2 ? 'Position unavailable. Try again or enter manually.' :
-              'Location request timed out. Try again.'
-        )
-        setGeoLoading(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    )
+      } catch (err) {
+        console.error("Failed to detect location details:", err)
+      }
+    } catch (err) {
+      setGeoError(err.message)
+    }
+    setGeoLoading(false)
   }
 
   const handleAutoDetectBoundary = async () => {
@@ -263,14 +321,14 @@ export default function Farms() {
       {/* Stats */}
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon blue"><MapPin size={22} /></div>
+          <div className="stat-icon blue"><MapPin size={18} /></div>
           <div className="stat-info">
-            <h4>Total Farms</h4>
+            <h4>Farms</h4>
             <div className="stat-value">{farms.length}</div>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon green"><Leaf size={22} /></div>
+          <div className="stat-icon green"><Leaf size={18} /></div>
           <div className="stat-info">
             <h4>Total Area</h4>
             <div className="stat-value">
@@ -279,9 +337,9 @@ export default function Farms() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon cyan"><Droplets size={22} /></div>
+          <div className="stat-icon cyan"><Droplets size={18} /></div>
           <div className="stat-info">
-            <h4>Crop Types</h4>
+            <h4>Crops</h4>
             <div className="stat-value">
               {new Set(farms.flatMap(f => (f.crop_type || '').split(',').map(c => c.trim())).filter(Boolean)).size}
             </div>
@@ -290,34 +348,21 @@ export default function Farms() {
       </div>
 
       {/* Info Banner: Composite Health Scoring */}
-      <div style={{
-        marginBottom: 16,
-        padding: 12,
-        background: 'linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%)',
-        border: '1px solid #3b82f6',
-        borderRadius: 8,
-        fontSize: 13
-      }}>
-        <div style={{ fontWeight: 600, color: '#1e40af', marginBottom: 4 }}>
-          🎯 Comprehensive Health Assessment
-        </div>
-        <div style={{ color: '#1e3a8a' }}>
-          Farm health badges now consider <strong>all vegetation indices</strong> (NDVI, NDRE, NDWI, EVI, SAVI) for accurate assessment, not just NDVI alone.
-          {' '}<span style={{ opacity: 0.8 }}>Healthy ≥70% • Moderate 50-70% • High stress &lt;50%</span>
-        </div>
+      <div style={{ marginBottom: 10, padding: '8px 10px', background: '#e8f5e9', border: '1px solid #2d7a3a40', borderRadius: 8, fontSize: 11, color: '#1b5e26' }}>
+        Health badges use all indices (NDVI, NDRE, NDWI, EVI, SAVI). <span style={{ opacity: 0.7 }}>Healthy ≥70% · Moderate 50-70% · Stress &lt;50%</span>
       </div>
 
       {/* Register button */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <button
           className="btn btn-primary"
           onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData(emptyForm) }}
         >
-          {showForm ? <><X size={16} /> Cancel</> : <><Plus size={16} /> Register New Farm</>}
+          {showForm ? <><X size={14} /> Cancel</> : <><Plus size={14} /> Register Farm</>}
         </button>
       </div>
 
-      {error && <div className="error-box" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && <div className="error-box" style={{ marginBottom: 10 }}>{error}</div>}
 
       {/* Registration / Edit Form */}
       {showForm && (
@@ -327,6 +372,57 @@ export default function Farms() {
           </div>
           <div className="card-body">
             <form onSubmit={handleSubmit}>
+              {/* UPI Quick Search */}
+              {!editingId && (
+                <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>
+                    <Search size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
+                    Quick Fill from UPI (Official Land Parcel)
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      className="form-control"
+                      value={upiQuery}
+                      onChange={e => setUpiQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleUpiSearch())}
+                      placeholder="e.g. 4/03/10/01/136"
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleUpiSearch}
+                      disabled={upiSearching || !upiQuery.trim()}
+                      style={{ whiteSpace: 'nowrap', padding: '6px 16px' }}
+                    >
+                      {upiSearching ? 'Searching...' : 'Find Parcel'}
+                    </button>
+                  </div>
+                  {upiError && <div style={{ color: '#f87171', fontSize: 12, marginTop: 6 }}>{upiError}</div>}
+                  {selectedParcelBoundary && <div style={{ color: '#34d399', fontSize: 12, marginTop: 6 }}>Parcel boundary loaded — will be saved with farm.</div>}
+                  {upiResults.length > 1 && (
+                    <div style={{ marginTop: 8, maxHeight: 160, overflowY: 'auto' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Multiple parcels found — select one:</div>
+                      {upiResults.map(p => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => applyParcelToForm(p)}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            width: '100%', padding: '8px 10px', marginBottom: 4, borderRadius: 6,
+                            border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)',
+                            color: 'var(--text-primary)', cursor: 'pointer', textAlign: 'left', fontSize: 12,
+                          }}
+                        >
+                          <span><b>{p.upi}</b> — {[p.village, p.cell, p.sector].filter(Boolean).join(', ')}</span>
+                          <span style={{ color: 'var(--primary)' }}>{p.area_hectares ? `${p.area_hectares} ha` : ''}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
                 <div className="form-group">
                   <label>Farm Name *</label>
@@ -389,6 +485,26 @@ export default function Farms() {
                   </select>
                 </div>
                 <div className="form-group">
+                  <label>Cell</label>
+                  <input
+                    className="form-control"
+                    name="cell"
+                    value={formData.cell}
+                    onChange={handleChange}
+                    placeholder="e.g. Ruhengeri"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Village</label>
+                  <input
+                    className="form-control"
+                    name="village"
+                    value={formData.village}
+                    onChange={handleChange}
+                    placeholder="e.g. Kabeza"
+                  />
+                </div>
+                <div className="form-group">
                   <label>Crop Types</label>
                   <input
                     className="form-control"
@@ -405,7 +521,7 @@ export default function Farms() {
                     className="form-control"
                     name="area"
                     type="number"
-                    step="0.1"
+                    step="any"
                     min="0"
                     value={formData.area}
                     onChange={handleChange}
@@ -572,7 +688,7 @@ export default function Farms() {
       }
 
       {/* Farm Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {farms.map(farm => {
           const sat = satellite.find(s => s.id === farm.id)
           const ndvi = sat?.ndvi
@@ -664,36 +780,36 @@ export default function Farms() {
                 </div>
               </div>
               <div className="card-body">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', fontSize: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
                   <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Location</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Location</span>
                     <div style={{ fontWeight: 500 }}>{farm.location || '—'}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Crop Type</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Crop</span>
                     <div style={{ fontWeight: 500 }}>{farm.crop_type || '—'}</div>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Size</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Size</span>
                     <div style={{ fontWeight: 500 }}>{farm.size_hectares || farm.area || '—'} ha</div>
                   </div>
                   {farm.latitude && (
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Coordinates</span>
-                      <div style={{ fontWeight: 500, fontSize: 12 }}>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Coords</span>
+                      <div style={{ fontWeight: 500, fontSize: 11 }}>
                         {farm.latitude?.toFixed(4)}, {farm.longitude?.toFixed(4)}
                       </div>
                     </div>
                   )}
                   {sat?.ndvi_date && (
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Last Update</span>
-                      <div style={{ fontWeight: 500 }}>{sat.ndvi_date}</div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Updated</span>
+                      <div style={{ fontWeight: 500 }}>{formatDate(sat.ndvi_date)}</div>
                     </div>
                   )}
                   {sat?.data_source && (
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Source</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Source</span>
                       <div style={{ fontWeight: 500 }}>{sat.data_source}</div>
                     </div>
                   )}
@@ -701,84 +817,46 @@ export default function Farms() {
 
                 {/* Vegetation Indices */}
                 {hasIndices ? (
-                  <div style={{ marginTop: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>Vegetation Indices</div>
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>Vegetation Indices</div>
                     {[
-                      { label: 'NDVI', value: ndvi, desc: 'Vegetation health' },
-                      { label: 'NDRE', value: ndre, desc: 'Chlorophyll content' },
-                      { label: 'NDWI', value: ndwi, desc: 'Water stress' },
-                      { label: 'EVI', value: evi, desc: 'Canopy structure' },
-                      { label: 'SAVI', value: savi, desc: 'Soil-adjusted veg.' },
+                      { label: 'NDVI', value: ndvi },
+                      { label: 'NDRE', value: ndre },
+                      { label: 'NDWI', value: ndwi },
+                      { label: 'EVI', value: evi },
+                      { label: 'SAVI', value: savi },
                     ].filter(idx => idx.value != null).map(idx => (
-                      <div key={idx.label} style={{ marginBottom: 6 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
-                          <span style={{ color: 'var(--text-secondary)' }} title={idx.desc}>{idx.label}</span>
+                      <div key={idx.label} style={{ marginBottom: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 1 }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>{idx.label}</span>
                           <span style={{ fontWeight: 600 }}>{idx.value.toFixed(3)}</span>
                         </div>
-                        <div className="confidence-bar" style={{ height: 6 }}>
-                          <div
-                            className="confidence-fill"
-                            style={{
-                              width: `${Math.min(Math.max(idx.value, 0), 1) * 100}%`,
-                              background: idx.value >= 0.6 ? 'var(--success)' : idx.value >= 0.4 ? 'var(--warning)' : 'var(--danger)',
-                            }}
-                          />
+                        <div className="confidence-bar" style={{ height: 4 }}>
+                          <div className="confidence-fill" style={{
+                            width: `${Math.min(Math.max(idx.value, 0), 1) * 100}%`,
+                            background: idx.value >= 0.6 ? 'var(--success)' : idx.value >= 0.4 ? 'var(--warning)' : 'var(--danger)',
+                          }} />
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : !progress && (
-                  <div style={{
-                    marginTop: 16, padding: 12, borderRadius: 8,
-                    background: hasCoords ? '#dbeafe20' : '#fef3c720',
-                    border: `1px solid ${hasCoords ? '#3b82f640' : '#d9770640'}`,
-                    textAlign: 'center',
-                  }}>
-                    <Satellite size={20} style={{ color: 'var(--text-secondary)', marginBottom: 4 }} />
-                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
-                      {hasCoords
-                        ? 'No satellite data yet'
-                        : 'Add coordinates to enable satellite monitoring'}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                      {hasCoords
-                        ? 'Click "Fetch Satellite Data" below to download imagery'
-                        : 'Use "Edit" to add latitude/longitude or GPS location'}
+                  <div style={{ marginTop: 10, padding: 8, borderRadius: 6, background: 'var(--bg-surface)', textAlign: 'center' }}>
+                    <Satellite size={16} style={{ color: 'var(--text-secondary)', marginBottom: 2 }} />
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      {hasCoords ? 'No satellite data yet' : 'Add coordinates for monitoring'}
                     </div>
                   </div>
                 )}
 
                 {/* Buffer Size Warning for farms without boundaries */}
-                {hasCoords && farm.area && !farm.boundary && (() => {
-                  const bufferAreaHa = (3.14159 * 50 * 50) / 10000  // 50m buffer
+                {hasCoords && farm.area && !farm.has_boundary && (() => {
+                  const bufferAreaHa = (3.14159 * 50 * 50) / 10000
                   const ratio = bufferAreaHa / farm.area
-
                   if (ratio > 1.5) {
                     return (
-                      <div style={{
-                        marginTop: 16,
-                        padding: 10,
-                        background: '#fef3c7',
-                        border: '1px solid #f59e0b',
-                        borderRadius: 6,
-                        fontSize: 12
-                      }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
-                          <span style={{ fontSize: 16 }}>⚠️</span>
-                          <div>
-                            <strong style={{ color: '#92400e', display: 'block', marginBottom: 2 }}>
-                              Data may be inaccurate
-                            </strong>
-                            <div style={{ color: '#78350f', lineHeight: 1.4 }}>
-                              Farm size: {farm.area.toFixed(1)} ha • Sampled area: ~{bufferAreaHa.toFixed(1)} ha ({ratio.toFixed(1)}x larger)
-                            </div>
-                            {hasRole('agronomist', 'admin') && (
-                              <div style={{ marginTop: 4, fontSize: 11, color: '#78350f' }}>
-                                Add a boundary polygon for accurate analysis
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                      <div style={{ marginTop: 8, padding: '6px 8px', background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, fontSize: 11, color: '#92400e' }}>
+                        ⚠️ Sampled area ~{bufferAreaHa.toFixed(1)} ha ({ratio.toFixed(1)}x farm size). Add boundary for accuracy.
                       </div>
                     )
                   }
@@ -787,38 +865,23 @@ export default function Farms() {
 
                 {/* Satellite Fetch Progress / Button */}
                 {hasCoords && (
-                  <div style={{ marginTop: 16 }}>
+                  <div style={{ marginTop: 10 }}>
                     {progress ? (
                       <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>
-                            <Satellite size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            <Satellite size={11} style={{ marginRight: 3, verticalAlign: 'middle' }} />
                             {progress.stage}
                           </span>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>
-                            {progress.percent}%
-                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{progress.percent}%</span>
                         </div>
-                        <div style={{
-                          height: 8, borderRadius: 4, background: 'var(--bg-secondary, #f1f5f9)',
-                          overflow: 'hidden',
-                        }}>
-                          <div style={{
-                            height: '100%', borderRadius: 4,
-                            width: `${progress.percent}%`,
-                            background: progress.percent >= 100 ? 'var(--success)' : 'var(--primary)',
-                            transition: 'width 0.5s ease',
-                          }} />
+                        <div style={{ height: 5, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', borderRadius: 3, width: `${progress.percent}%`, background: progress.percent >= 100 ? 'var(--success)' : 'var(--primary)', transition: 'width 0.5s ease' }} />
                         </div>
                       </div>
                     ) : (
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: 13, padding: '6px 12px' }}
-                        onClick={() => handleFetchSatellite(farm.id)}
-                      >
-                        <Satellite size={14} />
-                        Fetch Satellite Data
+                      <button className="btn btn-sm btn-secondary" onClick={() => handleFetchSatellite(farm.id)}>
+                        <Satellite size={13} /> Fetch Data
                       </button>
                     )}
                   </div>

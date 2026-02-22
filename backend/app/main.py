@@ -13,16 +13,19 @@ uploads_dir = Path(os.environ.get('UPLOAD_DIR', '/app/data/uploads'))
 uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
-# Configure CORS to allow requests from the frontend
+# Configure CORS to allow requests from frontend and mobile app
 origins = [
     "http://localhost:3000",
     "http://localhost:8000",
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
+    "https://localhost",          # Capacitor Android
+    "capacitor://localhost",      # Capacitor iOS
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https?://.*\.onrender\.com",  # Render deployment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { formatDate } from '../utils/formatDate'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area,
@@ -265,7 +266,7 @@ export default function StressMonitoring() {
                 <h3>Current Vegetation Indices</h3>
                 {indices.acquisition_date && (
                   <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {new Date(indices.acquisition_date).toLocaleDateString()}
+                    {formatDate(indices.acquisition_date)}
                   </span>
                 )}
               </div>
@@ -289,7 +290,7 @@ export default function StressMonitoring() {
             <div className="card" style={{ marginBottom: 20 }}>
               <div className="card-header"><h3>Vegetation Health History (90 days)</h3></div>
               <div className="card-body">
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={180}>
                   <AreaChart data={health}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" fontSize={11} />

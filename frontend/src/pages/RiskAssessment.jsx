@@ -77,25 +77,20 @@ export default function RiskAssessment() {
   return (
     <>
       {/* Farm selector */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
-            <label>Select Farm</label>
-            <select
-              className="form-control"
-              value={selectedFarm}
-              onChange={e => setSelectedFarm(Number(e.target.value))}
-            >
-              {farms.map(f => <option key={f.id} value={f.id}>{f.name} — {f.crop_type || 'Unknown crop'}</option>)}
+      <div className="card">
+        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: 140 }}>
+            <select className="form-control" value={selectedFarm} onChange={e => setSelectedFarm(Number(e.target.value))} style={{ fontSize: 13 }}>
+              {farms.map(f => <option key={f.id} value={f.id}>{f.name} — {f.crop_type || 'Unknown'}</option>)}
             </select>
           </div>
-          <button className="btn btn-primary" onClick={loadRisk} disabled={loading || !selectedFarm}>
-            {loading ? 'Analyzing...' : 'Refresh Assessment'}
+          <button className="btn btn-sm btn-primary" onClick={loadRisk} disabled={loading || !selectedFarm}>
+            {loading ? 'Analyzing...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {error && <div className="error-box" style={{ marginBottom: 20 }}><AlertTriangle size={18} />{error}</div>}
+      {error && <div className="error-box" style={{ marginBottom: 10 }}><AlertTriangle size={14} />{error}</div>}
 
       {loading && <div className="loading"><div className="spinner" /><p>Running risk assessment...</p></div>}
 
@@ -133,11 +128,11 @@ export default function RiskAssessment() {
               <div className="card-header"><h3>Risk Components</h3></div>
               <div className="card-body">
                 {radarData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
+                  <ResponsiveContainer width="100%" height={200}>
                     <RadarChart data={radarData}>
                       <PolarGrid />
-                      <PolarAngleAxis dataKey="subject" fontSize={11} />
-                      <PolarRadiusAxis domain={[0, 100]} fontSize={10} />
+                      <PolarAngleAxis dataKey="subject" fontSize={9} />
+                      <PolarRadiusAxis domain={[0, 100]} fontSize={9} />
                       <Radar dataKey="value" stroke={gaugeColor} fill={gaugeColor} fillOpacity={0.3} />
                     </RadarChart>
                   </ResponsiveContainer>
@@ -181,13 +176,13 @@ export default function RiskAssessment() {
               <div className="card-header"><h3>Risk Factor Contributions</h3></div>
               <div className="card-body">
                 {contribData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
+                  <ResponsiveContainer width="100%" height={200}>
                     <BarChart data={contribData} layout="vertical">
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" domain={[0, 100]} fontSize={12} />
-                      <YAxis type="category" dataKey="name" fontSize={11} width={120} />
+                      <XAxis type="number" domain={[0, 100]} fontSize={10} />
+                      <YAxis type="category" dataKey="name" fontSize={9} width={90} />
                       <Tooltip />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      <Bar dataKey="value" radius={[0, 3, 3, 0]}>
                         {contribData.map((_, i) => (
                           <Cell key={i} fill={i === 0 ? 'var(--danger)' : i === 1 ? 'var(--warning)' : 'var(--primary)'} />
                         ))}

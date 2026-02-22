@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
-import Sidebar from './components/Sidebar'
-import Header from './components/Header'
+import BottomNav from './components/BottomNav'
+import MobileHeader from './components/MobileHeader'
+import FloatingActionButton from './components/FloatingActionButton'
 import Dashboard from './pages/Dashboard'
 import Farms from './pages/Farms'
 import DiseaseClassifier from './pages/DiseaseClassifier'
@@ -13,26 +14,27 @@ import SatelliteData from './pages/SatelliteData'
 import DiseaseForecasts from './pages/DiseaseForecasts'
 import MLModels from './pages/MLModels'
 import EarlyWarning from './pages/EarlyWarning'
+import MoreMenu from './pages/MoreMenu'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import UserManagement from './pages/UserManagement'
 import { getHealth } from './api'
 
 const PAGE_TITLES = {
-  '/': 'Dashboard',
-  '/farms': 'Farm Management',
-  '/disease-classifier': 'Disease Classifier',
+  '/': 'CropRisk',
+  '/farms': 'My Farms',
+  '/disease-classifier': 'Scan Disease',
   '/risk-assessment': 'Risk Assessment',
-  '/stress-monitoring': 'Stress Monitoring',
+  '/stress-monitoring': 'Stress Monitor',
   '/satellite': 'Satellite Data',
-  '/disease-forecasts': 'Disease Forecasts',
-  '/early-warning': 'Early Warning System',
+  '/disease-forecasts': 'Forecasts',
+  '/early-warning': 'Alerts',
   '/ml-models': 'ML Models',
-  '/users': 'User Management',
+  '/users': 'Users',
+  '/more': 'More',
 }
 
 function AppRoutes() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [apiStatus, setApiStatus] = useState('loading')
   const { isAuthenticated, loading } = useAuth()
 
@@ -44,13 +46,12 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#0a1628' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#1B3A1F' }}>
         <div className="spinner" />
       </div>
     )
   }
 
-  // Public routes (login/register) — no sidebar/header
   if (!isAuthenticated) {
     return (
       <Routes>
@@ -61,17 +62,11 @@ function AppRoutes() {
     )
   }
 
-  // Authenticated layout
   return (
-    <div className="app-layout">
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="main-content">
-        <Header
-          titles={PAGE_TITLES}
-          apiStatus={apiStatus}
-          onMenuClick={() => setSidebarOpen(true)}
-        />
-        <div className="page-content">
+    <div className="mobile-app-layout">
+      <MobileHeader titles={PAGE_TITLES} apiStatus={apiStatus} />
+      <div className="mobile-main">
+        <div className="mobile-page-content">
           <Routes>
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/farms" element={
@@ -113,11 +108,14 @@ function AppRoutes() {
                 <UserManagement />
               </ProtectedRoute>
             } />
+            <Route path="/more" element={<ProtectedRoute><MoreMenu /></ProtectedRoute>} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/register" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </div>
+      <BottomNav />
+      <FloatingActionButton />
     </div>
   )
 }
