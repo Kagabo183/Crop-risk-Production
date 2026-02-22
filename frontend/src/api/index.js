@@ -1,9 +1,11 @@
 import axios from 'axios'
 import { Capacitor } from '@capacitor/core'
 
-// On native (Android/iOS), use 10.0.2.2 (emulator) or localhost (adb reverse) since there's no Vite proxy
+// On native (Android/iOS), use the hosted Render backend; browser dev uses Vite proxy
+const RENDER_URL = 'https://crop-prediction-staging.onrender.com/api/v1'
+
 const API_BASE = Capacitor.isNativePlatform()
-  ? 'http://localhost:8000/api/v1'
+  ? RENDER_URL
   : '/api/v1'
 
 const api = axios.create({
