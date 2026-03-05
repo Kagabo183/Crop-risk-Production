@@ -1,0 +1,29 @@
+{
+  "classes": {
+    "0": "Potato___Early_blight",
+    "1": "Potato___healthy",
+    "2": "Potato___Late_blight"
+  },
+  "class_to_idx": {
+    "Potato___Early_blight": 0,
+    "Potato___healthy": 1,
+    "Potato___Late_blight": 2
+  },
+  "num_classes": 3,
+  "crop_key": "potato",
+  "display_name": "Irish Potato (Urusenda)",
+  "version": "potato_v1.0",
+  "dataset": "Tanzania Irish Potato Disease Dataset (58,709 images)",
+  "source": "Mbeya region, Southern Highlands of Tanzania, Nov 2022 - Apr 2023",
+  "training": {
+    "epochs": 20,
+    "fine_tuning_from_epoch": 13,
+    "final_accuracy": 0.997,
+    "val_samples": 8807,
+    "per_class_f1": {
+      "Early Blight": 1.00,
+      "Healthy": 1.00,
+      "Late Blight": 1.00
+    }
+  }
+}

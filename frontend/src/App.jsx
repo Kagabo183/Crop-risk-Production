@@ -20,23 +20,28 @@ import Register from './pages/Register'
 import UserManagement from './pages/UserManagement'
 import { getHealth } from './api'
 
+import { PlatformProvider, usePlatform } from './context/PlatformContext'
+import MobileLayout from './components/MobileLayout'
+import WebLayout from './components/WebLayout'
+
 const PAGE_TITLES = {
-  '/': 'CropRisk',
-  '/farms': 'My Farms',
-  '/disease-classifier': 'Scan Disease',
-  '/risk-assessment': 'Risk Assessment',
-  '/stress-monitoring': 'Stress Monitor',
-  '/satellite': 'Satellite Data',
-  '/disease-forecasts': 'Forecasts',
-  '/early-warning': 'Alerts',
-  '/ml-models': 'ML Models',
-  '/users': 'Users',
-  '/more': 'More',
+  '/': 'Dashboard Overview',
+  '/farms': 'Farm Management',
+  '/disease-classifier': 'AI Disease Classifier',
+  '/risk-assessment': 'Agronomic Risk Assessment',
+  '/stress-monitoring': 'Crop Stress Monitoring',
+  '/satellite': 'Satellite Index Analysis',
+  '/disease-forecasts': 'Outbreak Forecasts',
+  '/early-warning': 'Regional Alerts',
+  '/ml-models': 'ML Model Engine',
+  '/users': 'System User Management',
+  '/more': 'Account & Settings',
 }
 
 function AppRoutes() {
   const [apiStatus, setApiStatus] = useState('loading')
   const { isAuthenticated, loading } = useAuth()
+  const { isWeb } = usePlatform()
 
   useEffect(() => {
     getHealth()
@@ -62,68 +67,75 @@ function AppRoutes() {
     )
   }
 
+  const routes = (
+    <Routes>
+      <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/farms" element={
+        <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+          <Farms />
+        </ProtectedRoute>
+      } />
+      <Route path="/disease-classifier" element={
+        <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+          <DiseaseClassifier />
+        </ProtectedRoute>
+      } />
+      <Route path="/risk-assessment" element={
+        <ProtectedRoute roles={['admin', 'agronomist']}>
+          <RiskAssessment />
+        </ProtectedRoute>
+      } />
+      <Route path="/stress-monitoring" element={
+        <ProtectedRoute><StressMonitoring /></ProtectedRoute>
+      } />
+      <Route path="/satellite" element={
+        <ProtectedRoute><SatelliteData /></ProtectedRoute>
+      } />
+      <Route path="/disease-forecasts" element={
+        <ProtectedRoute roles={['admin', 'agronomist']}>
+          <DiseaseForecasts />
+        </ProtectedRoute>
+      } />
+      <Route path="/early-warning" element={
+        <ProtectedRoute><EarlyWarning /></ProtectedRoute>
+      } />
+      <Route path="/ml-models" element={
+        <ProtectedRoute roles={['admin', 'agronomist']}>
+          <MLModels />
+        </ProtectedRoute>
+      } />
+      <Route path="/users" element={
+        <ProtectedRoute roles={['admin']}>
+          <UserManagement />
+        </ProtectedRoute>
+      } />
+      <Route path="/more" element={<ProtectedRoute><MoreMenu /></ProtectedRoute>} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/register" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+
+  if (isWeb) {
+    return (
+      <WebLayout titles={PAGE_TITLES} apiStatus={apiStatus}>
+        {routes}
+      </WebLayout>
+    )
+  }
+
   return (
-    <div className="mobile-app-layout">
-      <MobileHeader titles={PAGE_TITLES} apiStatus={apiStatus} />
-      <div className="mobile-main">
-        <div className="mobile-page-content">
-          <Routes>
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/farms" element={
-              <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
-                <Farms />
-              </ProtectedRoute>
-            } />
-            <Route path="/disease-classifier" element={
-              <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
-                <DiseaseClassifier />
-              </ProtectedRoute>
-            } />
-            <Route path="/risk-assessment" element={
-              <ProtectedRoute roles={['admin', 'agronomist', 'viewer']}>
-                <RiskAssessment />
-              </ProtectedRoute>
-            } />
-            <Route path="/stress-monitoring" element={
-              <ProtectedRoute><StressMonitoring /></ProtectedRoute>
-            } />
-            <Route path="/satellite" element={
-              <ProtectedRoute><SatelliteData /></ProtectedRoute>
-            } />
-            <Route path="/disease-forecasts" element={
-              <ProtectedRoute roles={['admin', 'agronomist', 'viewer']}>
-                <DiseaseForecasts />
-              </ProtectedRoute>
-            } />
-            <Route path="/early-warning" element={
-              <ProtectedRoute><EarlyWarning /></ProtectedRoute>
-            } />
-            <Route path="/ml-models" element={
-              <ProtectedRoute roles={['admin', 'agronomist']}>
-                <MLModels />
-              </ProtectedRoute>
-            } />
-            <Route path="/users" element={
-              <ProtectedRoute roles={['admin']}>
-                <UserManagement />
-              </ProtectedRoute>
-            } />
-            <Route path="/more" element={<ProtectedRoute><MoreMenu /></ProtectedRoute>} />
-            <Route path="/login" element={<Navigate to="/" replace />} />
-            <Route path="/register" element={<Navigate to="/" replace />} />
-          </Routes>
-        </div>
-      </div>
-      <BottomNav />
-      <FloatingActionButton />
-    </div>
+    <MobileLayout titles={PAGE_TITLES} apiStatus={apiStatus}>
+      {routes}
+    </MobileLayout>
   )
 }
 
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <PlatformProvider>
+        <AppRoutes />
+      </PlatformProvider>
     </AuthProvider>
   )
 }

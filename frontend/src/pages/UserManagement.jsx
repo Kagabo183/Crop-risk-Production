@@ -5,10 +5,9 @@ const ROLE_COLORS = {
     admin: '#e74c3c',
     agronomist: '#3498db',
     farmer: '#2ecc71',
-    viewer: '#9b59b6',
 }
 
-const ROLE_OPTIONS = ['admin', 'agronomist', 'farmer', 'viewer']
+const ROLE_OPTIONS = ['admin', 'agronomist', 'farmer']
 
 export default function UserManagement() {
     const [users, setUsers] = useState([])

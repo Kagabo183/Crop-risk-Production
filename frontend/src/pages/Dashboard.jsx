@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react'
+import { calculateHealthScore } from '../utils/healthScore'
 import { Link } from 'react-router-dom'
 import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts'
-import { MapPin, ShieldAlert, Activity, Bug, Satellite, TrendingUp, AlertTriangle } from 'lucide-react'
+import { MapPin, Activity, Bug, Satellite, AlertTriangle, Leaf } from 'lucide-react'
 import { getFarms, getFarmSatellite, getModelStatus, getEarlyWarnings } from '../api'
 import { useAuth } from '../context/AuthContext'
-
-const RISK_COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626', severe: '#7c2d12' }
+import { usePlatform } from '../context/PlatformContext'
 
 export default function Dashboard() {
+  const { isWeb } = usePlatform()
   const { user, hasRole } = useAuth()
+  const isFarmer = hasRole('farmer') && !hasRole('admin', 'agronomist')
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
   const [models, setModels] = useState(null)
@@ -22,13 +24,14 @@ export default function Dashboard() {
     Promise.allSettled([
       getFarms(),
       getFarmSatellite(),
-      getModelStatus(),
+      ...(!isFarmer ? [getModelStatus()] : []),
       getEarlyWarnings(),
-    ]).then(([farmsRes, satRes, modelsRes, warnRes]) => {
-      if (farmsRes.status === 'fulfilled') setFarms(farmsRes.value.data)
-      if (satRes.status === 'fulfilled') setSatellite(satRes.value.data)
-      if (modelsRes.status === 'fulfilled') setModels(modelsRes.value.data)
-      if (warnRes.status === 'fulfilled') setWarnings(warnRes.value.data)
+    ]).then(results => {
+      let idx = 0
+      if (results[idx]?.status === 'fulfilled') setFarms(results[idx].value.data); idx++
+      if (results[idx]?.status === 'fulfilled') setSatellite(results[idx].value.data); idx++
+      if (!isFarmer && results[idx]?.status === 'fulfilled') setModels(results[idx].value.data); idx++
+      if (results[idx]?.status === 'fulfilled') setWarnings(results[idx].value.data)
       setLoading(false)
     }).catch(e => {
       setError(e.message)
@@ -36,35 +39,191 @@ export default function Dashboard() {
     })
   }, [])
 
-  if (loading) return <div className="loading"><div className="spinner" /><p>Loading dashboard...</p></div>
+  if (loading) return <div className="loading"><div className="spinner" /><p>Loading...</p></div>
   if (error) return <div className="error-box">{error}</div>
 
   // Compute stats
   const totalFarms = farms.length
   const satWithNdvi = satellite.filter(f => f.ndvi != null)
   const avgNdvi = satWithNdvi.length
-    ? (satWithNdvi.reduce((s, f) => s + f.ndvi, 0) / satWithNdvi.length).toFixed(3)
-    : '—'
+    ? satWithNdvi.reduce((s, f) => s + f.ndvi, 0) / satWithNdvi.length
+    : null
 
   const healthyCounts = { healthy: 0, moderate: 0, stressed: 0, noData: 0 }
   satellite.forEach(f => {
-    if (f.ndvi == null) { healthyCounts.noData++; return }
-    if (f.ndvi >= 0.6) healthyCounts.healthy++
-    else if (f.ndvi >= 0.4) healthyCounts.moderate++
+    const { status } = calculateHealthScore(f)
+    if (status === 'unknown') healthyCounts.noData++
+    else if (status === 'healthy') healthyCounts.healthy++
+    else if (status === 'moderate') healthyCounts.moderate++
     else healthyCounts.stressed++
   })
 
-  const pieData = hasRole('agronomist', 'admin')
-    ? [
-      { name: 'Healthy', value: healthyCounts.healthy, color: '#16a34a' },
-      { name: 'Moderate', value: healthyCounts.moderate, color: '#d97706' },
-      { name: 'Stressed', value: healthyCounts.stressed, color: '#dc2626' },
-    ].filter(d => d.value > 0)
-    : [
-      { name: 'Doing Well', value: healthyCounts.healthy, color: '#16a34a' },
-      { name: 'Watch Closely', value: healthyCounts.moderate, color: '#d97706' },
-      { name: 'Needs Care', value: healthyCounts.stressed, color: '#dc2626' },
-    ].filter(d => d.value > 0)
+  // ── Farmer-friendly Dashboard ──
+  if (isFarmer) {
+    return (
+      <>
+        {/* Welcome */}
+        <div style={{ marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>
+            👋 Hello, {user?.full_name?.split(' ')[0] || 'Farmer'}!
+          </h2>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+            Here's how your farms are doing today.
+          </p>
+        </div>
+
+        {/* Main Content Grid */}
+        <div className={isWeb ? 'grid-2' : ''} style={{ gap: isWeb ? 24 : 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isWeb ? 24 : 12 }}>
+            {/* Simple Stats */}
+            <div className="stats-grid" style={{ marginBottom: 0 }}>
+              <div className="stat-card">
+                <div className="stat-icon blue"><MapPin size={18} /></div>
+                <div className="stat-info">
+                  <h4>My Farms</h4>
+                  <div className="stat-value">{totalFarms}</div>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon green"><Leaf size={18} /></div>
+                <div className="stat-info">
+                  <h4>Crop Health</h4>
+                  <div className="stat-value">
+                    {avgNdvi != null ? `${Math.round(avgNdvi * 100)}%` : '—'}
+                  </div>
+                  {avgNdvi != null && (
+                    <div className={`stat-change ${avgNdvi >= 0.5 ? 'positive' : 'negative'}`}>
+                      {avgNdvi >= 0.6 ? '🌿 Great!' : avgNdvi >= 0.4 ? '👀 Watching' : '⚠️ Stressed'}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {isWeb && (
+                <>
+                  <div className="stat-card">
+                    <div className="stat-icon orange"><AlertTriangle size={18} /></div>
+                    <div className="stat-info">
+                      <h4>Urgent Alerts</h4>
+                      <div className="stat-value">{healthyCounts.stressed}</div>
+                    </div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-icon blue"><Satellite size={18} /></div>
+                    <div className="stat-info">
+                      <h4>Sync Status</h4>
+                      <div className="stat-value">{satWithNdvi.length}/{totalFarms}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Warnings — only if there are any */}
+            {warnings?.alerts?.filter(a => a.alert_level !== 'low').length > 0 && (
+              <div className="card" style={{ marginBottom: 0 }}>
+                <div className="card-header">
+                  <h3><AlertTriangle size={14} style={{ verticalAlign: -2, marginRight: 4, color: 'var(--warning)' }} />Warnings</h3>
+                  <Link to="/early-warning" className="btn btn-sm btn-secondary">See All</Link>
+                </div>
+                <div className="card-body">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {warnings.alerts.filter(a => a.alert_level !== 'low').slice(0, 3).map(a => (
+                      <div key={a.farm_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span className={`badge ${a.alert_level === 'critical' ? 'high' : a.alert_level}`} style={{ minWidth: 55, textAlign: 'center', fontSize: 10 }}>
+                          {a.alert_level === 'critical' ? '🔴 Urgent' : a.alert_level === 'high' ? '🟠 High' : '🟡 Watch'}
+                        </span>
+                        <strong style={{ fontSize: 13, flex: 1 }}>{a.farm_name}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Actions (Dashboard shortcuts) */}
+            <div className="stats-grid" style={{ marginBottom: 0 }}>
+              <Link to="/disease-classifier" style={{ textDecoration: 'none' }}>
+                <div className="stat-card" style={{ cursor: 'pointer', height: '100%' }}>
+                  <div className="stat-icon red"><Bug size={18} /></div>
+                  <div className="stat-info">
+                    <h4>Scan Leaf</h4>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Check disease</div>
+                  </div>
+                </div>
+              </Link>
+              <Link to="/farms" style={{ textDecoration: 'none' }}>
+                <div className="stat-card" style={{ cursor: 'pointer', height: '100%' }}>
+                  <div className="stat-icon blue"><MapPin size={18} /></div>
+                  <div className="stat-info">
+                    <h4>My Farms</h4>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Update farms</div>
+                  </div>
+                </div>
+              </Link>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isWeb ? 24 : 12 }}>
+            {/* My Farms List */}
+            <div className="card" style={{ height: '100%', marginBottom: 0 }}>
+              <div className="card-header">
+                <h3>My Farms</h3>
+                <Link to="/farms" className="btn btn-secondary btn-sm" style={{ padding: '4px 8px', fontSize: 11 }}>View All</Link>
+              </div>
+              <div className="card-body" style={{ padding: 0 }}>
+                {farms.length === 0 ? (
+                  <div className="empty-state" style={{ padding: 40 }}>
+                    <MapPin size={32} />
+                    <p>No farms registered</p>
+                  </div>
+                ) : (
+                  <div className="farm-list-mini">
+                    {farms.slice(0, 5).map(farm => {
+                      const sat = satellite.find(s => s.id === farm.id)
+                      const { status } = calculateHealthScore(sat)
+                      return (
+                        <Link key={farm.id} to={`/farms?id=${farm.id}`} className="list-item" style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          padding: '12px 16px',
+                          borderBottom: '1px solid var(--border)',
+                          textDecoration: 'none',
+                          color: 'inherit'
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{farm.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                              {farm.crop_type} • {farm.size_hectares || farm.area || '—'} ha
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                            {sat?.ndvi != null && (
+                              <span style={{ fontWeight: 700, fontSize: 14 }}>{Math.round(sat.ndvi * 100)}%</span>
+                            )}
+                            <span className={`badge ${status}`} style={{ minWidth: 50, textAlign: 'center' }}>
+                              {status === 'stressed' ? 'Alert' : status}
+                            </span>
+                          </div>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  // ── Agronomist / Admin Dashboard (full technical view) ──
+  const pieData = [
+    { name: 'Healthy', value: healthyCounts.healthy, color: '#16a34a' },
+    { name: 'Moderate', value: healthyCounts.moderate, color: '#d97706' },
+    { name: 'Stressed', value: healthyCounts.stressed, color: '#dc2626' },
+  ].filter(d => d.value > 0)
 
   const ndviChart = satellite
     .filter(f => f.ndvi != null)
@@ -84,18 +243,20 @@ export default function Dashboard() {
         <div className="stat-card">
           <div className="stat-icon blue"><MapPin size={18} /></div>
           <div className="stat-info">
-            <h4>{hasRole('admin') ? 'Total Farms' : hasRole('agronomist') ? 'District Farms' : 'My Farms'}</h4>
+            <h4>{hasRole('admin') ? 'Total Farms' : 'District Farms'}</h4>
             <div className="stat-value">{totalFarms}</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><Satellite size={18} /></div>
           <div className="stat-info">
-            <h4>{hasRole('agronomist', 'admin') ? 'Avg NDVI' : 'Crop Health'}</h4>
-            <div className="stat-value">{avgNdvi}</div>
-            <div className={`stat-change ${Number(avgNdvi) >= 0.5 ? 'positive' : 'negative'}`}>
-              {Number(avgNdvi) >= 0.5 ? 'Healthy' : 'Below healthy'}
-            </div>
+            <h4>Avg NDVI</h4>
+            <div className="stat-value">{avgNdvi != null ? avgNdvi.toFixed(3) : '—'}</div>
+            {avgNdvi != null && (
+              <div className={`stat-change ${avgNdvi >= 0.5 ? 'positive' : 'negative'}`}>
+                {avgNdvi >= 0.5 ? 'Healthy' : 'Below healthy'}
+              </div>
+            )}
           </div>
         </div>
         <div className="stat-card">
@@ -103,7 +264,9 @@ export default function Dashboard() {
           <div className="stat-info">
             <h4>Stressed</h4>
             <div className="stat-value">{healthyCounts.stressed}</div>
-            <div className="stat-change negative">Need attention</div>
+            <div className={`stat-change ${healthyCounts.stressed > 0 ? 'negative' : 'positive'}`}>
+              {healthyCounts.stressed > 0 ? 'Need attention' : 'All clear'}
+            </div>
           </div>
         </div>
         <div className="stat-card">
@@ -111,17 +274,50 @@ export default function Dashboard() {
           <div className="stat-info">
             <h4>ML Models</h4>
             <div className="stat-value">{modelsReady}/{modelCount}</div>
-            <div className="stat-change positive">Ready</div>
+            <div className="stat-change positive">Engine Ready</div>
           </div>
         </div>
       </div>
+
+      {isWeb && (
+        <div className="stats-grid" style={{ marginBottom: 24 }}>
+          <Link to="/disease-classifier" className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className="stat-icon red"><Bug size={18} /></div>
+            <div className="stat-info">
+              <h4>Analyze Samples</h4>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Identify crop diseases via AI</div>
+            </div>
+          </Link>
+          <Link to="/early-warning" className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className="stat-icon orange"><AlertTriangle size={18} /></div>
+            <div className="stat-info">
+              <h4>Regional Alerts</h4>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Monitor outbreak hotspots</div>
+            </div>
+          </Link>
+          <Link to="/satellite" className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className="stat-icon green"><Satellite size={18} /></div>
+            <div className="stat-info">
+              <h4>Satellite Sync</h4>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Refresh farm health indices</div>
+            </div>
+          </Link>
+          <Link to="/risk-assessment" className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className="stat-icon blue"><Activity size={18} /></div>
+            <div className="stat-info">
+              <h4>Risk Summary</h4>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>View agronomist reports</div>
+            </div>
+          </Link>
+        </div>
+      )}
 
       {/* Charts Row */}
       <div className="grid-2">
         {/* NDVI Bar Chart */}
         <div className="card">
           <div className="card-header">
-            <h3>{hasRole('agronomist', 'admin') ? 'NDVI Health' : 'Farm Health'}</h3>
+            <h3>NDVI Health</h3>
             <Link to="/satellite" className="btn btn-sm btn-secondary">Details</Link>
           </div>
           <div className="card-body">
@@ -186,7 +382,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Farm List (mobile-friendly cards instead of wide table) */}
+      {/* Farm List */}
       <div className="card">
         <div className="card-header">
           <h3>Farm Overview</h3>
@@ -198,15 +394,7 @@ export default function Dashboard() {
               {farms.map(farm => {
                 const sat = satellite.find(s => s.id === farm.id)
                 const ndvi = sat?.ndvi
-                const compositeHealth = (() => {
-                  if (ndvi == null) return null
-                  const scaleValue = (val, low, high) => val == null ? null : Math.max(0, Math.min(100, ((val - low) / (high - low)) * 100))
-                  const scores = { ndvi: [scaleValue(ndvi, 0.15, 0.70), 0.30], ndwi: [scaleValue(sat?.ndwi, -0.30, 0.05), 0.25], ndre: [scaleValue(sat?.ndre, 0.05, 0.35), 0.20], evi: [scaleValue(sat?.evi, 0.10, 0.50), 0.15], savi: [scaleValue(sat?.savi, 0.10, 0.55), 0.10] }
-                  let tw = 0, ws = 0
-                  Object.values(scores).forEach(([s, w]) => { if (s != null) { ws += s * w; tw += w } })
-                  return tw > 0 ? ws / tw : null
-                })()
-                const status = compositeHealth == null ? 'unknown' : compositeHealth >= 75 ? 'healthy' : compositeHealth >= 40 ? 'moderate' : 'stressed'
+                const { status } = calculateHealthScore(sat)
 
                 return (
                   <div key={farm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -229,14 +417,13 @@ export default function Dashboard() {
               <MapPin size={32} />
               <h3>No farms found</h3>
               <p>{hasRole('agronomist') ? `No farms in ${user?.district} yet.` : "Register your first farm to get started."}</p>
-              {hasRole('farmer') && <Link to="/farms" className="btn btn-primary" style={{ marginTop: 8 }}>Add Farm</Link>}
             </div>
           )}
         </div>
       </div>
 
       {/* Early Warning Alerts */}
-      {warnings && warnings.alerts && warnings.alerts.filter(a => a.alert_level !== 'low').length > 0 && (
+      {warnings?.alerts?.filter(a => a.alert_level !== 'low').length > 0 && (
         <div className="card">
           <div className="card-header">
             <h3><AlertTriangle size={14} style={{ verticalAlign: -2, marginRight: 4, color: 'var(--warning)' }} />Warnings</h3>
@@ -257,46 +444,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      {/* Quick Actions */}
-      <div className="stats-grid">
-        <Link to="/disease-classifier" style={{ textDecoration: 'none' }}>
-          <div className="stat-card" style={{ cursor: 'pointer' }}>
-            <div className="stat-icon red"><Bug size={18} /></div>
-            <div className="stat-info">
-              <h4>Scan Disease</h4>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Upload leaf image</div>
-            </div>
-          </div>
-        </Link>
-        <Link to="/risk-assessment" style={{ textDecoration: 'none' }}>
-          <div className="stat-card" style={{ cursor: 'pointer' }}>
-            <div className="stat-icon orange"><ShieldAlert size={18} /></div>
-            <div className="stat-info">
-              <h4>Risk Assessment</h4>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>ML-powered analysis</div>
-            </div>
-          </div>
-        </Link>
-        <Link to="/stress-monitoring" style={{ textDecoration: 'none' }}>
-          <div className="stat-card" style={{ cursor: 'pointer' }}>
-            <div className="stat-icon green"><Activity size={18} /></div>
-            <div className="stat-info">
-              <h4>Stress Monitor</h4>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>Drought, heat, water</div>
-            </div>
-          </div>
-        </Link>
-        <Link to="/disease-forecasts" style={{ textDecoration: 'none' }}>
-          <div className="stat-card" style={{ cursor: 'pointer' }}>
-            <div className="stat-icon cyan"><TrendingUp size={18} /></div>
-            <div className="stat-info">
-              <h4>Forecasts</h4>
-              <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>7-day disease risk</div>
-            </div>
-          </div>
-        </Link>
-      </div>
     </>
   )
 }

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { usePlatform } from '../context/PlatformContext'
 import { Upload, Camera, AlertTriangle, CheckCircle, Loader2, Clock, ChevronDown, ChevronUp } from 'lucide-react'
 import { classifyDisease, getSupportedDiseases, getCropModels, getClassificationHistory } from '../api'
 import { formatDate } from '../utils/formatDate'
 
 export default function DiseaseClassifier() {
+  const { isWeb } = usePlatform()
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [cropType, setCropType] = useState('')

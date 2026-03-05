@@ -18,7 +18,6 @@ const ROLE_BADGE = {
   admin: { label: 'Admin', color: '#e74c3c' },
   agronomist: { label: 'Agronomist', color: '#3498db' },
   farmer: { label: 'Farmer', color: '#2ecc71' },
-  viewer: { label: 'Viewer', color: '#9b59b6' },
 }
 
 export default function Sidebar({ open, onClose }) {
@@ -38,7 +37,7 @@ export default function Sidebar({ open, onClose }) {
       label: 'Analysis', items: [
         ...(hasRole('admin', 'agronomist', 'farmer') ?
           [{ to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' }] : []),
-        ...(hasRole('admin', 'agronomist', 'viewer') ?
+        ...(hasRole('admin', 'agronomist') ?
           [{ to: '/risk-assessment', icon: ShieldAlert, text: 'Risk Assessment' }] : []),
         { to: '/stress-monitoring', icon: Activity, text: 'Stress Monitoring' },
         { to: '/early-warning', icon: AlertTriangle, text: 'Early Warning' },
@@ -47,7 +46,7 @@ export default function Sidebar({ open, onClose }) {
     {
       label: 'Data', items: [
         { to: '/satellite', icon: Satellite, text: 'Satellite Data' },
-        ...(hasRole('admin', 'agronomist', 'viewer') ?
+        ...(hasRole('admin', 'agronomist') ?
           [{ to: '/disease-forecasts', icon: TrendingUp, text: 'Disease Forecasts' }] : []),
         ...(hasRole('admin', 'agronomist') ?
           [{ to: '/ml-models', icon: Cpu, text: 'ML Models' }] : []),
@@ -100,11 +99,17 @@ export default function Sidebar({ open, onClose }) {
               {(user?.full_name || user?.email || '?')[0].toUpperCase()}
             </div>
             <div className="sidebar-user-details">
-              <span className="sidebar-user-name">{user?.full_name || user?.email}</span>
-              <span className="sidebar-user-role" style={{ color: badge.color }}>
-                {badge.label}
-                {user?.district && user.role === 'agronomist' && <span style={{ opacity: 0.7 }}> • {user.district}</span>}
+              <span className="sidebar-user-name" title={user?.full_name || user?.email}>
+                {user?.full_name || user?.email}
               </span>
+              <div className="sidebar-user-badges">
+                <span className="sidebar-user-role" style={{ background: badge.color + '22', color: badge.color }}>
+                  {badge.label}
+                </span>
+                {user?.district && user.role === 'agronomist' && (
+                  <span className="sidebar-user-district">{user.district}</span>
+                )}
+              </div>
             </div>
           </div>
           <button className="sidebar-logout" onClick={logout} title="Sign out">

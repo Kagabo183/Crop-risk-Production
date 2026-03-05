@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { usePlatform } from '../context/PlatformContext'
 import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
 import { getEarlyWarnings, fetchWeatherAll } from '../api'
 
@@ -6,6 +7,7 @@ const LEVEL_COLORS = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706'
 const LEVEL_LABELS = { critical: 'Critical', high: 'High', moderate: 'Moderate', low: 'Low' }
 
 export default function EarlyWarning() {
+  const { isWeb } = usePlatform()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [fetching, setFetching] = useState(false)

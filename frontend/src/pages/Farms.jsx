@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { formatDate } from '../utils/formatDate'
+import { calculateHealthScore } from '../utils/healthScore'
 import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, X, Check, Navigation, Satellite, Scan, Footprints, Search } from 'lucide-react'
 import { getFarms, getFarmSatellite, createFarm, updateFarm, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoDetectBoundary, saveFarmBoundary, detectLocation, searchParcels } from '../api'
 import WalkMyFarm from '../components/WalkMyFarm'
@@ -7,6 +8,8 @@ import ParcelLookup from '../components/ParcelLookup'
 import { useAuth } from '../context/AuthContext'
 import LOCATIONS from '../data/locations.json'
 import { getCurrentPosition } from '../utils/native'
+import { usePlatform } from '../context/PlatformContext'
+import { Link } from 'react-router-dom'
 
 const emptyForm = {
   name: '', district: '', sector: '', cell: '', village: '', province: '', crop_type: '',
@@ -28,6 +31,7 @@ const PROVINCE_MAP = {
 }
 
 export default function Farms() {
+  const { isWeb } = usePlatform()
   const { user, hasRole } = useAuth()
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
@@ -323,7 +327,7 @@ export default function Farms() {
         <div className="stat-card">
           <div className="stat-icon blue"><MapPin size={18} /></div>
           <div className="stat-info">
-            <h4>Farms</h4>
+            <h4>Total Registered</h4>
             <div className="stat-value">{farms.length}</div>
           </div>
         </div>
@@ -339,12 +343,21 @@ export default function Farms() {
         <div className="stat-card">
           <div className="stat-icon cyan"><Droplets size={18} /></div>
           <div className="stat-info">
-            <h4>Crops</h4>
+            <h4>Unique Crops</h4>
             <div className="stat-value">
               {new Set(farms.flatMap(f => (f.crop_type || '').split(',').map(c => c.trim())).filter(Boolean)).size}
             </div>
           </div>
         </div>
+        {!isWeb && (
+          <div className="stat-card">
+            <div className="stat-icon orange"><Satellite size={18} /></div>
+            <div className="stat-info">
+              <h4>With Data</h4>
+              <div className="stat-value">{satellite.length}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Info Banner: Composite Health Scoring */}
@@ -687,210 +700,226 @@ export default function Farms() {
       )
       }
 
-      {/* Farm Cards */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {farms.map(farm => {
-          const sat = satellite.find(s => s.id === farm.id)
-          const ndvi = sat?.ndvi
-          const ndre = sat?.ndre
-          const ndwi = sat?.ndwi
-          const evi = sat?.evi
-          const savi = sat?.savi
-          const hasIndices = ndvi != null || ndre != null || ndwi != null || evi != null || savi != null
-          const hasCoords = farm.latitude && farm.longitude
-
-          // ── Composite Health Score (All Indices) ──
-          const calculateCompositeHealth = () => {
-            if (!hasIndices) return 'unknown'
-
-            let healthScore = 0
-            let totalWeight = 0
-
-            // NDVI (30% weight) - Primary vegetation health
-            if (ndvi != null) {
-              const ndviScore = ndvi >= 0.6 ? 100 : ndvi >= 0.5 ? 70 : ndvi >= 0.4 ? 50 : ndvi >= 0.3 ? 30 : 10
-              healthScore += ndviScore * 0.30
-              totalWeight += 0.30
-            }
-
-            // NDRE (20% weight) - Chlorophyll/nitrogen status
-            if (ndre != null) {
-              const ndreScore = ndre >= 0.5 ? 100 : ndre >= 0.4 ? 70 : ndre >= 0.3 ? 50 : ndre >= 0.2 ? 30 : 10
-              healthScore += ndreScore * 0.20
-              totalWeight += 0.20
-            }
-
-            // NDWI (20% weight) - Water content
-            if (ndwi != null) {
-              const ndwiScore = ndwi >= 0.3 ? 100 : ndwi >= 0.2 ? 70 : ndwi >= 0.1 ? 50 : ndwi >= 0 ? 30 : 10
-              healthScore += ndwiScore * 0.20
-              totalWeight += 0.20
-            }
-
-            // EVI (15% weight) - Enhanced vegetation (atmospheric correction)
-            if (evi != null) {
-              const eviScore = evi >= 0.6 ? 100 : evi >= 0.4 ? 70 : evi >= 0.3 ? 50 : evi >= 0.2 ? 30 : 10
-              healthScore += eviScore * 0.15
-              totalWeight += 0.15
-            }
-
-            // SAVI (15% weight) - Soil-adjusted
-            if (savi != null) {
-              const saviScore = savi >= 0.5 ? 100 : savi >= 0.4 ? 70 : savi >= 0.3 ? 50 : savi >= 0.2 ? 30 : 10
-              healthScore += saviScore * 0.15
-              totalWeight += 0.15
-            }
-
-            // Normalize by actual total weight
-            const finalScore = totalWeight > 0 ? healthScore / totalWeight : 0
-
-            // Determine status badge
-            if (finalScore >= 70) return 'healthy'
-            if (finalScore >= 50) return 'moderate'
-            return 'high' // high stress
-          }
-
-          const healthStatus = calculateCompositeHealth()
-          const progress = satProgress[farm.id]
-
-          return (
-            <div key={farm.id} className="card">
-              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3>{farm.name}</h3>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span className={`badge ${healthStatus}`}>
-                    {healthStatus === 'unknown' ? 'No data' : healthStatus}
-                  </span>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 8px', fontSize: 12 }}
-                    onClick={() => handleEdit(farm)}
-                    title="Edit farm"
-                  >
-                    <Edit3 size={14} />
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }}
-                    onClick={() => handleDelete(farm.id, farm.name)}
-                    title="Delete farm"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-              <div className="card-body">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Location</span>
-                    <div style={{ fontWeight: 500 }}>{farm.location || '—'}</div>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Crop</span>
-                    <div style={{ fontWeight: 500 }}>{farm.crop_type || '—'}</div>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Size</span>
-                    <div style={{ fontWeight: 500 }}>{farm.size_hectares || farm.area || '—'} ha</div>
-                  </div>
-                  {farm.latitude && (
-                    <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Coords</span>
-                      <div style={{ fontWeight: 500, fontSize: 11 }}>
-                        {farm.latitude?.toFixed(4)}, {farm.longitude?.toFixed(4)}
-                      </div>
-                    </div>
-                  )}
-                  {sat?.ndvi_date && (
-                    <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Updated</span>
-                      <div style={{ fontWeight: 500 }}>{formatDate(sat.ndvi_date)}</div>
-                    </div>
-                  )}
-                  {sat?.data_source && (
-                    <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Source</span>
-                      <div style={{ fontWeight: 500 }}>{sat.data_source}</div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Vegetation Indices */}
-                {hasIndices ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>Vegetation Indices</div>
-                    {[
-                      { label: 'NDVI', value: ndvi },
-                      { label: 'NDRE', value: ndre },
-                      { label: 'NDWI', value: ndwi },
-                      { label: 'EVI', value: evi },
-                      { label: 'SAVI', value: savi },
-                    ].filter(idx => idx.value != null).map(idx => (
-                      <div key={idx.label} style={{ marginBottom: 4 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 1 }}>
-                          <span style={{ color: 'var(--text-secondary)' }}>{idx.label}</span>
-                          <span style={{ fontWeight: 600 }}>{idx.value.toFixed(3)}</span>
-                        </div>
-                        <div className="confidence-bar" style={{ height: 4 }}>
-                          <div className="confidence-fill" style={{
-                            width: `${Math.min(Math.max(idx.value, 0), 1) * 100}%`,
-                            background: idx.value >= 0.6 ? 'var(--success)' : idx.value >= 0.4 ? 'var(--warning)' : 'var(--danger)',
-                          }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : !progress && (
-                  <div style={{ marginTop: 10, padding: 8, borderRadius: 6, background: 'var(--bg-surface)', textAlign: 'center' }}>
-                    <Satellite size={16} style={{ color: 'var(--text-secondary)', marginBottom: 2 }} />
-                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                      {hasCoords ? 'No satellite data yet' : 'Add coordinates for monitoring'}
-                    </div>
-                  </div>
-                )}
-
-                {/* Buffer Size Warning for farms without boundaries */}
-                {hasCoords && farm.area && !farm.has_boundary && (() => {
-                  const bufferAreaHa = (3.14159 * 50 * 50) / 10000
-                  const ratio = bufferAreaHa / farm.area
-                  if (ratio > 1.5) {
+      {/* Farm List */}
+      {isWeb ? (
+        <div className="card">
+          <div className="card-header">
+            <h3>Registered Farm Portfolios</h3>
+          </div>
+          <div className="card-body" style={{ padding: 0 }}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Farm Name</th>
+                    <th>Region (Sector)</th>
+                    <th>Crop Portfolio</th>
+                    <th>Area (ha)</th>
+                    <th>Health Score</th>
+                    <th>Last Sync</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {farms.length === 0 ? (
+                    <tr><td colSpan="7" style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>No farms registered yet.</td></tr>
+                  ) : farms.map(farm => {
+                    const sat = satellite.find(s => s.id === farm.id)
+                    const { status: healthStatus, score } = calculateHealthScore(sat)
                     return (
-                      <div style={{ marginTop: 8, padding: '6px 8px', background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, fontSize: 11, color: '#92400e' }}>
-                        ⚠️ Sampled area ~{bufferAreaHa.toFixed(1)} ha ({ratio.toFixed(1)}x farm size). Add boundary for accuracy.
-                      </div>
+                      <tr key={farm.id}>
+                        <td style={{ fontWeight: 600 }}>{farm.name}</td>
+                        <td>{farm.location || '—'}</td>
+                        <td>
+                          {farm.crop_type ? (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {farm.crop_type.split(',').map(c => (
+                                <span key={c} className="badge info" style={{ fontSize: 9 }}>{c.trim()}</span>
+                              ))}
+                            </div>
+                          ) : '—'}
+                        </td>
+                        <td>{farm.size_hectares || farm.area || '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className={`badge ${healthStatus}`}>{healthStatus}</span>
+                            {score != null && <span style={{ opacity: 0.6, fontSize: 10 }}>{Math.round(score)}%</span>}
+                          </div>
+                        </td>
+                        <td>{sat?.ndvi_date ? formatDate(sat.ndvi_date) : 'Never'}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(farm)}>
+                              <Edit3 size={14} /> Edit
+                            </button>
+                            <button className="btn btn-secondary btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleDelete(farm.id, farm.name)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     )
-                  }
-                  return null
-                })()}
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {farms.map(farm => {
+            const sat = satellite.find(s => s.id === farm.id)
+            const ndvi = sat?.ndvi
+            const ndre = sat?.ndre
+            const ndwi = sat?.ndwi
+            const evi = sat?.evi
+            const savi = sat?.savi
+            const hasIndices = ndvi != null || ndre != null || ndwi != null || evi != null || savi != null
+            const hasCoords = farm.latitude && farm.longitude
 
-                {/* Satellite Fetch Progress / Button */}
-                {hasCoords && (
-                  <div style={{ marginTop: 10 }}>
-                    {progress ? (
+            // ── Composite Health Score (shared utility) ──
+            const { status: healthStatus } = calculateHealthScore(sat)
+            const progress = satProgress[farm.id]
+
+            return (
+              <div key={farm.id} className="card">
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3>{farm.name}</h3>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span className={`badge ${healthStatus}`}>
+                      {healthStatus === 'unknown' ? 'No data' : healthStatus}
+                    </span>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 8px', fontSize: 12 }}
+                      onClick={() => handleEdit(farm)}
+                      title="Edit farm"
+                    >
+                      <Edit3 size={14} />
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '4px 8px', fontSize: 12, color: 'var(--danger)' }}
+                      onClick={() => handleDelete(farm.id, farm.name)}
+                      title="Delete farm"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div className="card-body">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Location</span>
+                      <div style={{ fontWeight: 500 }}>{farm.location || '—'}</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Crop</span>
+                      <div style={{ fontWeight: 500 }}>{farm.crop_type || '—'}</div>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Size</span>
+                      <div style={{ fontWeight: 500 }}>{farm.size_hectares || farm.area || '—'} ha</div>
+                    </div>
+                    {farm.latitude && (
                       <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                            <Satellite size={11} style={{ marginRight: 3, verticalAlign: 'middle' }} />
-                            {progress.stage}
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{progress.percent}%</span>
-                        </div>
-                        <div style={{ height: 5, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', borderRadius: 3, width: `${progress.percent}%`, background: progress.percent >= 100 ? 'var(--success)' : 'var(--primary)', transition: 'width 0.5s ease' }} />
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Coords</span>
+                        <div style={{ fontWeight: 500, fontSize: 11 }}>
+                          {farm.latitude?.toFixed(4)}, {farm.longitude?.toFixed(4)}
                         </div>
                       </div>
-                    ) : (
-                      <button className="btn btn-sm btn-secondary" onClick={() => handleFetchSatellite(farm.id)}>
-                        <Satellite size={13} /> Fetch Data
-                      </button>
+                    )}
+                    {sat?.ndvi_date && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Updated</span>
+                        <div style={{ fontWeight: 500 }}>{formatDate(sat.ndvi_date)}</div>
+                      </div>
+                    )}
+                    {sat?.data_source && (
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Source</span>
+                        <div style={{ fontWeight: 500 }}>{sat.data_source}</div>
+                      </div>
                     )}
                   </div>
-                )}
+
+                  {/* Vegetation Indices */}
+                  {hasIndices ? (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>Vegetation Indices</div>
+                      {[
+                        { label: 'NDVI', value: ndvi },
+                        { label: 'NDRE', value: ndre },
+                        { label: 'NDWI', value: ndwi },
+                        { label: 'EVI', value: evi },
+                        { label: 'SAVI', value: savi },
+                      ].filter(idx => idx.value != null).map(idx => (
+                        <div key={idx.label} style={{ marginBottom: 4 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 1 }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>{idx.label}</span>
+                            <span style={{ fontWeight: 600 }}>{idx.value.toFixed(3)}</span>
+                          </div>
+                          <div className="confidence-bar" style={{ height: 4 }}>
+                            <div className="confidence-fill" style={{
+                              width: `${Math.min(Math.max(idx.value, 0), 1) * 100}%`,
+                              background: idx.value >= 0.6 ? 'var(--success)' : idx.value >= 0.4 ? 'var(--warning)' : 'var(--danger)',
+                            }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : !progress && (
+                    <div style={{ marginTop: 10, padding: 8, borderRadius: 6, background: 'var(--bg-surface)', textAlign: 'center' }}>
+                      <Satellite size={16} style={{ color: 'var(--text-secondary)', marginBottom: 2 }} />
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                        {hasCoords ? 'No satellite data yet' : 'Add coordinates for monitoring'}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Buffer Size Warning for farms without boundaries */}
+                  {hasCoords && farm.area && !farm.has_boundary && (() => {
+                    const bufferAreaHa = (3.14159 * 50 * 50) / 10000
+                    const ratio = bufferAreaHa / farm.area
+                    if (ratio > 1.5) {
+                      return (
+                        <div style={{ marginTop: 8, padding: '6px 8px', background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, fontSize: 11, color: '#92400e' }}>
+                          ⚠️ Sampled area ~{bufferAreaHa.toFixed(1)} ha ({ratio.toFixed(1)}x farm size). Add boundary for accuracy.
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
+
+                  {/* Satellite Fetch Progress / Button */}
+                  {hasCoords && (
+                    <div style={{ marginTop: 10 }}>
+                      {progress ? (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                              <Satellite size={11} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                              {progress.stage}
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--primary)' }}>{progress.percent}%</span>
+                          </div>
+                          <div style={{ height: 5, borderRadius: 3, background: '#f1f5f9', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', borderRadius: 3, width: `${progress.percent}%`, background: progress.percent >= 100 ? 'var(--success)' : 'var(--primary)', transition: 'width 0.5s ease' }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <button className="btn btn-sm btn-secondary" onClick={() => handleFetchSatellite(farm.id)}>
+                          <Satellite size={13} /> Fetch Data
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+      )}
 
       {
         farms.length === 0 && !showForm && (

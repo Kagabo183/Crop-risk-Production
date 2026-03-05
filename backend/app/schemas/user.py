@@ -8,7 +8,6 @@ class UserRole(str, Enum):
     admin = "admin"
     agronomist = "agronomist"
     farmer = "farmer"
-    viewer = "viewer"
 
 
 class UserBase(BaseModel):

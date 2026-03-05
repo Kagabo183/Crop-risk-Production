@@ -84,20 +84,19 @@ require_farmer_or_above = require_role(
 )
 
 require_any_authenticated = require_role(
-    UserRole.admin, UserRole.agronomist, UserRole.farmer, UserRole.viewer
+    UserRole.admin, UserRole.agronomist, UserRole.farmer
 )
 
 def check_farm_access(farm, user: UserModel):
     """
     Enforce farm access rules:
     - Admin: All access
-    - Viewer: Read-only access to all (metrics only)
     - Demo farms (owner_id = NULL): Accessible to all authenticated users
     - Agronomist: Access only if farm is in their district
     - Farmer: Access only if they own the farm
     """
-    # Admin and viewer have full access
-    if user.role == "admin" or user.role == "viewer":
+    # Admin has full access
+    if user.role == "admin":
         return True
 
     # Demo farms (no owner) are accessible to all authenticated users

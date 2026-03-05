@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { usePlatform } from '../context/PlatformContext'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -10,6 +11,7 @@ const RISK_COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626', seve
 const RISK_BG = { low: 'var(--success-light)', moderate: 'var(--warning-light)', high: 'var(--danger-light)', severe: 'var(--danger-light)' }
 
 export default function RiskAssessment() {
+  const { isWeb } = usePlatform()
   const [farms, setFarms] = useState([])
   const [selectedFarm, setSelectedFarm] = useState('')
   const [risk, setRisk] = useState(null)
@@ -22,7 +24,7 @@ export default function RiskAssessment() {
     getFarms().then(r => {
       setFarms(r.data)
       if (r.data.length) setSelectedFarm(r.data[0].id)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   const loadRisk = async () => {
@@ -59,19 +61,19 @@ export default function RiskAssessment() {
   // Radar data from components
   const radarData = risk?.components
     ? Object.entries(risk.components).map(([key, val]) => ({
-        subject: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-        value: val,
-      }))
+      subject: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: val,
+    }))
     : []
 
   // Contribution bar data
   const contribData = explain?.contributions
     ? Object.entries(explain.contributions)
-        .sort(([, a], [, b]) => b - a)
-        .map(([key, val]) => ({
-          name: key.replace(/_/g, ' '),
-          value: +(val * 100).toFixed(1),
-        }))
+      .sort(([, a], [, b]) => b - a)
+      .map(([key, val]) => ({
+        name: key.replace(/_/g, ' '),
+        value: +(val * 100).toFixed(1),
+      }))
     : []
 
   return (

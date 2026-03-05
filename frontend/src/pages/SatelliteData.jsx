@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
+import { usePlatform } from '../context/PlatformContext'
 import { formatDate } from '../utils/formatDate'
+import { calculateHealthScore } from '../utils/healthScore'
 import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, ReferenceLine,
@@ -9,6 +11,7 @@ import { getFarmSatellite, getNdviHistory, getFarms, triggerSatelliteDownload, f
 import { useAuth } from '../context/AuthContext'
 
 export default function SatelliteData() {
+  const { isWeb } = usePlatform()
   const { hasRole } = useAuth()
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
@@ -226,8 +229,8 @@ export default function SatelliteData() {
             <div className="stat-info">
               <h4>Status</h4>
               <div className="stat-value" style={{ fontSize: 18 }}>
-                <span className={`badge ${farmSat.ndvi_status || 'info'}`}>
-                  {farmSat.ndvi_status || 'Unknown'}
+                <span className={`badge ${calculateHealthScore(farmSat).status}`}>
+                  {calculateHealthScore(farmSat).label}
                 </span>
               </div>
             </div>

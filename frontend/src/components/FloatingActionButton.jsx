@@ -15,7 +15,7 @@ export default function FloatingActionButton() {
     ...(hasRole('admin', 'agronomist', 'farmer')
       ? [{ icon: Bug, label: 'Scan Disease', color: '#E08A1E', bg: '#FFF3E0', action: () => navigate('/disease-classifier') }]
       : []),
-    ...(hasRole('admin', 'agronomist', 'viewer')
+    ...(hasRole('admin', 'agronomist')
       ? [{ icon: ShieldAlert, label: 'Check Risk', color: '#C62828', bg: '#FFEBEE', action: () => navigate('/risk-assessment') }]
       : []),
   ]

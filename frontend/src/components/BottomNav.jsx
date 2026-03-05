@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LayoutDashboard, MapPin, ShieldAlert, Activity, MoreHorizontal } from 'lucide-react'
+import { LayoutDashboard, MapPin, ShieldAlert, MoreHorizontal } from 'lucide-react'
 
 const TABS = [
   { to: '/', icon: LayoutDashboard, label: 'Home', end: true },
   { to: '/farms', icon: MapPin, label: 'Farms', roles: ['admin', 'agronomist', 'farmer'] },
   null, // FAB spacer
-  { to: '/early-warning', icon: ShieldAlert, label: 'Alerts' },
+  { to: '/early-warning', icon: ShieldAlert, label: 'Alerts', roles: ['admin', 'agronomist', 'farmer'] },
   { to: '/more', icon: MoreHorizontal, label: 'More' },
 ]
 

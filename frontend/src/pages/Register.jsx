@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { Eye, EyeOff } from 'lucide-react'
 import LOCATIONS from '../data/locations.json'
 import './Auth.css'
 
 const ROLES = [
     { value: 'farmer', label: '🌱 Farmer', desc: 'Manage your own farms and view crop health' },
     { value: 'agronomist', label: '🔬 Agronomist', desc: 'Monitor farms in your district' },
-    { value: 'viewer', label: '📊 Viewer', desc: 'Read-only access to dashboards and reports' },
 ]
 
 export default function Register() {
@@ -21,6 +21,8 @@ export default function Register() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
     const [success, setSuccess] = useState(false)
+    const [showPassword, setShowPassword] = useState(false)
+    const [showConfirm, setShowConfirm] = useState(false)
 
     // Derived state for districts
     const provinces = LOCATIONS?.provinces || []
@@ -121,13 +123,23 @@ export default function Register() {
                     <div className="auth-row">
                         <div className="auth-field">
                             <label htmlFor="password">Password *</label>
-                            <input id="password" name="password" type="password" value={form.password}
-                                onChange={handleChange} placeholder="Min 6 characters" required />
+                            <div className="password-wrapper">
+                                <input id="password" name="password" type={showPassword ? 'text' : 'password'} value={form.password}
+                                    onChange={handleChange} placeholder="Min 6 characters" required />
+                                <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)} tabIndex={-1}>
+                                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                </button>
+                            </div>
                         </div>
                         <div className="auth-field">
                             <label htmlFor="confirmPassword">Confirm Password *</label>
-                            <input id="confirmPassword" name="confirmPassword" type="password"
-                                value={form.confirmPassword} onChange={handleChange} placeholder="••••••••" required />
+                            <div className="password-wrapper">
+                                <input id="confirmPassword" name="confirmPassword" type={showConfirm ? 'text' : 'password'}
+                                    value={form.confirmPassword} onChange={handleChange} placeholder="Repeat password" required />
+                                <button type="button" className="password-toggle" onClick={() => setShowConfirm(!showConfirm)} tabIndex={-1}>
+                                    {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                                </button>
+                            </div>
                         </div>
                     </div>
 

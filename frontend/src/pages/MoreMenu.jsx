@@ -8,7 +8,6 @@ const ROLE_BADGE = {
   admin: { label: 'Admin', color: '#C62828' },
   agronomist: { label: 'Agronomist', color: '#00796B' },
   farmer: { label: 'Farmer', color: '#2d7a3a' },
-  viewer: { label: 'Viewer', color: '#7B1FA2' },
 }
 
 export default function MoreMenu() {
@@ -20,9 +19,9 @@ export default function MoreMenu() {
 
   const items = [
     { icon: Bug, label: 'Disease Classifier', to: '/disease-classifier', roles: ['admin', 'agronomist', 'farmer'] },
-    { icon: Activity, label: 'Stress Monitoring', to: '/stress-monitoring' },
-    { icon: Satellite, label: 'Satellite Data', to: '/satellite' },
-    { icon: TrendingUp, label: 'Disease Forecasts', to: '/disease-forecasts', roles: ['admin', 'agronomist', 'viewer'] },
+    { icon: Activity, label: 'Stress Monitoring', to: '/stress-monitoring', roles: ['admin', 'agronomist', 'farmer'] },
+    { icon: Satellite, label: 'Satellite Data', to: '/satellite', roles: ['admin', 'agronomist', 'farmer'] },
+    { icon: TrendingUp, label: 'Disease Forecasts', to: '/disease-forecasts', roles: ['admin', 'agronomist'] },
     { icon: Cpu, label: 'ML Models', to: '/ml-models', roles: ['admin', 'agronomist'] },
     { icon: Users, label: 'User Management', to: '/users', roles: ['admin'] },
   ]
