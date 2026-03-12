@@ -1,5 +1,8 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import farms, stress_monitoring, farm_satellite, ml, admin, early_warning, pipeline, fetch_real_data, auth, parcels
+from app.api.v1.endpoints import (
+    farms, stress_monitoring, farm_satellite, ml, admin,
+    early_warning, pipeline, fetch_real_data, auth, parcels, advisory,
+)
 
 api_router = APIRouter()
 
@@ -13,3 +16,4 @@ api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(early_warning.router, prefix="/early-warning", tags=["early-warning"])
 api_router.include_router(pipeline.router, prefix="/pipeline", tags=["pipeline"])
 api_router.include_router(fetch_real_data.router, tags=["real-data"])
+api_router.include_router(advisory.router, prefix="/advisory", tags=["advisory"])

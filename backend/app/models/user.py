@@ -15,7 +15,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String(50), unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String(100), nullable=False, default="")
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.farmer)

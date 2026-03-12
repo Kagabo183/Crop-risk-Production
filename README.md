@@ -121,6 +121,13 @@ The Crop Risk Prediction Platform provides:
 | **Interactive maps** | View detected boundaries on Leaflet maps |
 | **User ownership & RBAC** | Farmers see only their farms, agronomists see district, admins see all |
 
+### Authentication & Security
+| Feature | Description |
+|---------|-------------|
+| **Simple access** | Login requires a simple Username (name or number) and a 5-digit PIN |
+| **Mobile friendly** | PIN authentication designed for easier mobile and quick field access |
+| **Role-Based Access** | Farmers (own farms), Agronomists (district), Admins (all access) |
+
 ### Satellite Monitoring (Real Data via Google Earth Engine)
 | Feature | Description |
 |---------|-------------|

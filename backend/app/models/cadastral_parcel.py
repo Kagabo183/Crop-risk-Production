@@ -19,7 +19,7 @@ class CadastralParcel(Base):
     cell = Column(String(20), nullable=True)
     village = Column(String(30), nullable=True)
     cell_code = Column(String(10), nullable=True)
-    boundary = Column(Geometry(geometry_type="POLYGON", srid=4326), nullable=True)
+    boundary = Column(Geometry(geometry_type="POLYGON", srid=4326, spatial_index=False), nullable=True)
     area_sqm = Column(Float, nullable=True)
     centroid_lat = Column(Float, nullable=True)
     centroid_lon = Column(Float, nullable=True)

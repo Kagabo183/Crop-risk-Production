@@ -33,7 +33,13 @@ USE_PLANETARY_COMPUTER=true
 docker-compose up -d
 ```
 
-### 4. Check Status
+### 4. Seed Initial Data (Learning Mode)
+To populate the database with sample farms and users for learning:
+```bash
+docker-compose run --rm seed
+```
+
+### 5. Check Status
 ```bash
 docker-compose ps
 ```
@@ -44,13 +50,15 @@ NAME                   STATUS              PORTS
 crop-risk-backend      Up (healthy)        0.0.0.0:8000->8000/tcp
 crop-risk-beat         Up                  
 crop-risk-db           Up (healthy)        0.0.0.0:5434->5432/tcp
-crop-risk-frontend     Up (healthy)        0.0.0.0:3000->3000/tcp
+crop-risk-web-app      Up                  0.0.0.0:5174->5174/tcp
+crop-risk-mobile-app   Up                  0.0.0.0:5175->5175/tcp
 crop-risk-redis        Up (healthy)        0.0.0.0:6379->6379/tcp
 crop-risk-worker       Up                  
 ```
 
-### 5. Access Application
-- **Frontend:** http://localhost:3000
+### 6. Access Application
+- **Web Dashboard:** http://localhost:5174
+- **Mobile Preview:** http://localhost:5175
 - **Backend API:** http://localhost:8000
 - **API Docs:** http://localhost:8000/docs
 - **Database:** localhost:5434 (user: postgres, password: 1234)
@@ -103,14 +111,21 @@ crop-risk-worker       Up
 - **Health Check:** `curl http://localhost:8000/api/v1/health`
 - **Purpose:** REST API server
 
-### 3. **crop-risk-frontend** (React)
-- **Build:** `./frontend/Dockerfile`
-- **Port:** 3000
-- **Volume:** `./frontend` → `/app` (code, hot reload)
-- **Health Check:** `wget http://localhost:3000`
-- **Purpose:** Web UI
+### 3. **crop-risk-web-app** (React Dashboard)
+- **Build:** `./web-app/Dockerfile`
+- **Port:** 5174
+- **Volume:** `./web-app` → `/app` (code, hot reload)
+- **Health Check:** `wget http://localhost:5174`
+- **Purpose:** Web Analytics Dashboard
 
-### 4. **crop-risk-redis** (Redis)
+### 4. **crop-risk-mobile-app** (React Mobile)
+- **Build:** `./mobile-app/Dockerfile`
+- **Port:** 5175
+- **Volume:** `./mobile-app` → `/app` (code, hot reload)
+- **Health Check:** `wget http://localhost:5175`
+- **Purpose:** Mobile Interface Preview
+
+### 5. **crop-risk-redis** (Redis)
 - **Image:** `redis:7-alpine`
 - **Port:** 6379
 - **Health Check:** `redis-cli ping`
@@ -285,7 +300,7 @@ docker-compose exec db psql -U postgres crop_risk_db
 curl http://localhost:8000/api/v1/health
 
 # Frontend health
-curl http://localhost:3000
+curl http://localhost:5174
 
 # Database health
 docker-compose exec db pg_isready -U postgres
@@ -429,7 +444,7 @@ ALLOWED_HOSTS=your-domain.com
 
 | Service | Port | URL | Purpose |
 |---------|------|-----|---------|
-| Frontend | 3000 | http://localhost:3000 | Web UI |
+| Frontend | 5174 | http://localhost:5174 | Web UI |
 | Backend | 8000 | http://localhost:8000 | REST API |
 | API Docs | 8000 | http://localhost:8000/docs | Swagger UI |
 | Database | 5434 | localhost:5434 | PostgreSQL |
@@ -461,7 +476,7 @@ After starting containers, verify:
 
 - [ ] All 6 containers running: `docker-compose ps`
 - [ ] Backend healthy: `curl http://localhost:8000/api/v1/health`
-- [ ] Frontend accessible: `curl http://localhost:3000`
+- [ ] Frontend accessible: `curl http://localhost:5174`
 - [ ] Database connected: `docker-compose exec web python -c "from app.db.database import engine; engine.connect()"`
 - [ ] Redis working: `docker-compose exec redis redis-cli ping`
 - [ ] Worker processing: `docker-compose logs worker | grep "ready"`
@@ -474,7 +489,7 @@ After starting containers, verify:
 Your Crop Risk Platform is now running in Docker! 🚀
 
 **Next Steps:**
-1. Access frontend: http://localhost:3000
+1. Access frontend: http://localhost:5174
 2. Login with default credentials
 3. Navigate to "Stress Monitoring"
 4. Select a farm and click "Update Satellite Data"

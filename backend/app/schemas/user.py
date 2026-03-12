@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field, validator
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -11,7 +11,7 @@ class UserRole(str, Enum):
 
 
 class UserBase(BaseModel):
-    email: str
+    username: str
     full_name: str = ""
 
 
@@ -21,12 +21,18 @@ class UserCreate(UserBase):
     phone: Optional[str] = None
     district: Optional[str] = None
 
+    @validator('password')
+    def validate_pin(cls, v):
+        if not v.isdigit() or len(v) != 5:
+            raise ValueError('Password must be a 5-digit PIN')
+        return v
+
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     district: Optional[str] = None
-    email: Optional[str] = None
+    username: Optional[str] = None
 
 
 class UserRoleUpdate(BaseModel):
@@ -52,5 +58,5 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    email: Optional[str] = None
+    username: Optional[str] = None
     role: Optional[str] = None

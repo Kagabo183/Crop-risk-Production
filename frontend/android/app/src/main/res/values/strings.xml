@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Crop Risk</string>
-    <string name="title_activity_main">Crop Risk</string>
-    <string name="package_name">rw.croprisk.app</string>
-    <string name="custom_url_scheme">rw.croprisk.app</string>
-</resources>

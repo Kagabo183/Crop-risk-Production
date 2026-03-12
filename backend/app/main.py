@@ -15,11 +15,23 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # Configure CORS to allow requests from frontend and mobile app
 origins = [
+    # Legacy frontend (kept for backward compat)
     "http://localhost:3000",
     "http://localhost:8000",
     "http://127.0.0.1:3000",
-    "https://localhost",          # Capacitor Android
-    "capacitor://localhost",      # Capacitor iOS
+    # web-app (Vite dev server)
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    # mobile-app (Vite dev server / browser preview)
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    # Capacitor native shells
+    "https://localhost",
+    "capacitor://localhost",
+    "http://localhost",
+    "http://192.168.1.101",
+    "http://192.168.1.101:8000",
+    "http://192.168.1.101:5175",
 ]
 
 app.add_middleware(
@@ -71,8 +83,8 @@ def debug_register_test():
     try:
         db = SessionLocal()
         new_user = UserModel(
-            email="debugtest@test.com",
-            hashed_password=pwd_context.hash("test1234"),
+            username="debugtest",
+            hashed_password=pwd_context.hash("12345"),
             full_name="Debug Test",
             role=UserRole.farmer,
         )

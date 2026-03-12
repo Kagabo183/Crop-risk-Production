@@ -1,0 +1,12 @@
+
+# 2026-03-10 13:56:30.559184
++n
+
+# 2026-03-10 14:04:50.974635
++explain this project
+
+# 2026-03-10 14:05:35.230587
++python -m aider --model openai/qwen3.5-27b-claude-4.6-opus-reasoning-distilled --openai-api-base http://127.0.0.1:1234/v1 --openai-api-key lm-studio
+
+# 2026-03-10 14:05:40.654853
++y

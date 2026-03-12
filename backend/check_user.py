@@ -12,16 +12,15 @@ if len(users) == 0:
     print("\nNo users found. Creating test user...")
     test_user = User(
         username="admin",
-        email="admin@example.com",
-        hashed_password=get_password_hash("admin123"),
+        hashed_password=get_password_hash("12345"),
         full_name="Admin User"
     )
     db.add(test_user)
     db.commit()
-    print("✅ Created user: admin / admin123")
+    print("✅ Created user: admin / 12345")
 else:
     print("\nExisting users:")
     for user in users:
-        print(f"  - {user.username} ({user.email})")
+        print(f"  - {user.username}")
 
 db.close()

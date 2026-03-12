@@ -316,8 +316,11 @@ class SatelliteDataService:
             }
 
         except Exception as e:
-            logger.error(f"Error calculating vegetation indices with GEE: {e}")
-            return {}
+            logger.error(f"🚨 CRITICAL: Error calculating vegetation indices with GEE: {e}", exc_info=True)
+            return {
+                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'error': str(e)
+            }
     
     def _calculate_indices_planetary_computer(
         self,
@@ -403,11 +406,17 @@ class SatelliteDataService:
                 'savi': round(savi, 4),
             }
         except ImportError as e:
-            logger.error(f"Missing dependency for Planetary Computer index calculation: {e}. Install rioxarray and planetary-computer.")
-            return {}
+            logger.error(f"🚨 MISSING DEPENDENCY: {e}. Install rioxarray and planetary-computer (pip install rioxarray planetary-computer).")
+            return {
+                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'error': f"Missing dependency: {str(e)}"
+            }
         except Exception as e:
-            logger.error(f"Error calculating vegetation indices with Planetary Computer: {e}")
-            return {}
+            logger.error(f"🚨 CRITICAL: Error calculating vegetation indices with Planetary Computer: {e}", exc_info=True)
+            return {
+                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'error': str(e)
+            }
     
     def fetch_landsat_imagery(
         self, 

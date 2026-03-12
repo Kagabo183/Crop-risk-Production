@@ -49,7 +49,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 def _user_to_out(user: UserModel) -> dict:
     return {
         "id": user.id,
-        "email": user.email,
+        "username": user.username,
         "full_name": user.full_name,
         "role": user.role,
         "phone": user.phone,
@@ -64,12 +64,12 @@ def _user_to_out(user: UserModel) -> dict:
 @router.post("/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user account."""
-    db_user = db.query(UserModel).filter(UserModel.email == user.email).first()
+    db_user = db.query(UserModel).filter(UserModel.username == user.username).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Username already registered")
 
     new_user = UserModel(
-        email=user.email,
+        username=user.username,
         hashed_password=get_password_hash(user.password),
         full_name=user.full_name,
         role=user.role,
@@ -85,14 +85,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Login and receive JWT token with user profile."""
-    user = db.query(UserModel).filter(UserModel.email == form_data.username).first()
+    user = db.query(UserModel).filter(UserModel.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect email or password")
+        raise HTTPException(status_code=400, detail="Incorrect username or password")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     access_token = create_access_token(
-        data={"sub": user.email, "role": user.role.value},
+        data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     return {
@@ -123,13 +123,13 @@ def update_profile(
         current_user.phone = data.phone
     if data.district is not None:
         current_user.district = data.district
-    if data.email is not None:
+    if data.username is not None:
         existing = db.query(UserModel).filter(
-            UserModel.email == data.email, UserModel.id != current_user.id
+            UserModel.username == data.username, UserModel.id != current_user.id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Email already taken")
-        current_user.email = data.email
+            raise HTTPException(status_code=400, detail="Username already taken")
+        current_user.username = data.username
 
     current_user.updated_at = datetime.utcnow()
     db.commit()

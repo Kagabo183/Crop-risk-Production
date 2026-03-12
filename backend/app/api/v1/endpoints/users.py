@@ -1,4 +1,4 @@
-﻿
+
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ def get_users(db: Session = Depends(get_db)):
 @router.post("/", response_model=User)
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     hashed_password = get_password_hash(user.password)
-    db_user = UserModel(email=user.email, hashed_password=hashed_password)
+    db_user = UserModel(username=user.username, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -39,7 +39,7 @@ def update_user(user_id: int, user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    db_user.email = user.email
+    db_user.username = user.username
     db_user.hashed_password = get_password_hash(user.password)
     db.commit()
     db.refresh(db_user)

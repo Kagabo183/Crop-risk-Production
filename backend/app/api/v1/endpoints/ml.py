@@ -215,31 +215,67 @@ async def classify_disease(
         f.write(content)
 
     try:
+        # ── Step 1: Image quality gate ─────────────────────────────────────────
+        # Reject blurry / dark / tiny photos before running inference.
+        # Returns HTTP 422 with a farmer-friendly message the mobile app
+        # can display directly without any translation layer.
+        quality_warnings = []
+        try:
+            from app.ml.image_quality import ImageQualityChecker
+            quality = ImageQualityChecker().check(str(file_path))
+            if not quality["acceptable"]:
+                file_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "type": "image_quality",
+                        "feedback": quality["feedback"],
+                        "checks": quality.get("checks", {}),
+                        "blocking_issues": quality.get("blocking_issues", []),
+                    },
+                )
+            quality_warnings = quality.get("warnings", [])
+        except HTTPException:
+            raise
+        except Exception as qe:
+            logger.warning(f"Quality check skipped (non-blocking): {qe}")
+
         result = None
         model_type_used = "general_80class"
 
-        # Try per-crop model first
+        # ── Step 2: Per-crop specialised model + TTA ──────────────────────────
+        # Specialised models have fewer classes → higher per-class accuracy.
+        # TTA (5 augmented views) adds ~3-4% accuracy on field photos.
         if crop_type:
             from app.ml.crop_disease_config import get_crop_config
             crop_config = get_crop_config(crop_type)
 
             if crop_config:
                 from app.ml.crop_disease_classifier import CropDiseaseClassifier
+                from app.ml.tta_predictor import TTAPredictor
                 classifier = CropDiseaseClassifier(config=crop_config)
                 if classifier.load_model():
-                    result = classifier.predict_with_gradcam(str(file_path))
+                    tta = TTAPredictor(classifier, n_augments=5)
+                    result = tta.predict_with_gradcam(str(file_path))
                     model_type_used = "per_crop"
-                    logger.info(f"Used per-crop model for {crop_type}")
+                    logger.info(
+                        f"Per-crop model ({crop_type}) with TTA "
+                        f"({result.get('tta_augments_used', 0)} augments)"
+                    )
                 else:
-                    logger.info(f"Per-crop model for {crop_type} not available, falling back to general")
+                    logger.info(f"Per-crop model for {crop_type} not available, using general")
 
-        # Fallback to general 85-class model
+        # ── Step 3: General 85-class model + TTA (fallback) ──────────────────
         if result is None:
             from app.ml import DiseaseClassifier
+            from app.ml.tta_predictor import TTAPredictor
             classifier = DiseaseClassifier(crop_type=crop_type)
-            result = classifier.predict_with_gradcam(str(file_path))
+            classifier.load_model()
+            tta = TTAPredictor(classifier, n_augments=5)
+            result = tta.predict_with_gradcam(str(file_path))
+            logger.info("Used general 85-class model with TTA")
 
-        # Save classification to database
+        # ── Step 4: Persist result ────────────────────────────────────────────
         image_url = f"/uploads/{filename}"
         record = DiseaseClassification(
             user_id=current_user.id,
@@ -259,9 +295,14 @@ async def classify_disease(
         db.commit()
         db.refresh(record)
 
-        logger.info(f"Classification saved: id={record.id}, disease={record.disease}, confidence={record.confidence}")
+        logger.info(
+            f"Classification saved: id={record.id}, "
+            f"disease={record.disease}, confidence={record.confidence:.3f}, "
+            f"model={model_type_used}, "
+            f"tta_augments={result.get('tta_augments_used', 'N/A')}"
+        )
 
-        return DiseaseClassifyResponse(
+        response = DiseaseClassifyResponse(
             id=record.id,
             plant=result.get('plant', 'Unknown'),
             disease=result['disease'],
@@ -275,6 +316,15 @@ async def classify_disease(
             image_url=image_url,
         )
 
+        # Attach quality warnings as a non-standard field so the frontend
+        # can optionally display them without breaking the schema.
+        response_dict = response.model_dump()
+        response_dict["quality_warnings"] = quality_warnings
+        response_dict["tta_augments_used"] = result.get("tta_augments_used", 0)
+        return response_dict
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Disease classification failed: {e}")
         # Clean up image on failure
