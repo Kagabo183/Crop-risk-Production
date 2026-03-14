@@ -113,7 +113,6 @@ services:
     name: crop-risk-redis
     region: oregon
     plan: free
-    ipAllowList: []
 
 databases:
   - name: crop-risk-db
