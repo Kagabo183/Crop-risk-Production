@@ -11,19 +11,19 @@ function getInitialApiBaseUrl() {
 
   // Define possible backend URLs in order of preference
   return [
-    'http://localhost:8000/api/v1',         // 1. USB Debugging (ADB reverse)
-    'http://10.0.2.2:8000/api/v1',          // 2. Android Emulator
-    'http://192.168.1.101:8000/api/v1',     // 3. Same Wi-Fi Network
-    'http://41.216.119.113/api/v1'          // 4. Public Internet (No port 8000)
+    'https://crop-risk-api-zpgb.onrender.com/api/v1', // 1. Render production URL (prefer HTTPS)
+    'http://localhost:8000/api/v1',                   // 2. USB Debugging (ADB reverse)
+    'http://10.0.2.2:8000/api/v1',                    // 3. Android Emulator
+    'http://192.168.1.101:8000/api/v1',               // 4. Same Wi-Fi Network
   ]
 }
 
 const backendUrls = getInitialApiBaseUrl()
-const activeApiBase = Array.isArray(backendUrls) ? backendUrls[3] : backendUrls // Default to public IP
+const activeApiBase = Array.isArray(backendUrls) ? backendUrls[0] : backendUrls // Default to Render public URL
 
 const api = axios.create({
   baseURL: activeApiBase,
-  timeout: 10000, 
+  timeout: 120000, // 2 minutes default for mobile (ML calls can be slow)
 })
 
 // Auto-detect the fastest available backend on app startup if native
