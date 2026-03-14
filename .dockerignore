@@ -12,13 +12,19 @@ dist/
 node_modules
 frontend/node_modules
 frontend/build
+web-app/node_modules
+web-app/dist
+mobile-app/node_modules
+mobile-app/dist
+# Exclude large data directories but KEEP data/models (ML weights needed for production)
 data/raw
 data/processed
 data/sentinel2
 data/sentinel2_real
 data/sentinel2_local
-data/
-frontend/
+data/uploads
+# Keep data/models directory (contains trained ML models - ~78MB)
+# To preserve models, remove 'data' from dockerignore exclusions
 logs
 .git
 .github
@@ -28,6 +34,10 @@ logs
 tmp
 .idea
 .vscode
+*.log
+.pytest_cache
+.coverage
+htmlcov/
 __pycache__/
 *.egg-info
 coverage.xml

@@ -1,0 +1,23 @@
+{
+  "projectName": "crop-risk-web",
+  "framework": "vite",
+  "buildCommand": "cd web-app && npm run build",
+  "outputDirectory": "web-app/dist",
+  "installCommand": "npm install && cd web-app && npm install",
+  "env": {
+    "VITE_API_URL": "@vite_api_url"
+  },
+  "envPrefix": "VITE_",
+  "regions": ["pdx1"],
+  "functions": {
+    "api/**": {
+      "runtime": "nodejs18.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:match*",
+      "destination": "https://crop-risk-api.onrender.com/api/:match*"
+    }
+  ]
+}

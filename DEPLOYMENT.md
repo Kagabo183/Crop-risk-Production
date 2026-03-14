@@ -1,54 +1,150 @@
-# Deployment Guide
+# Production Deployment Guide
 
-Complete guide for deploying the Crop Risk Prediction Platform to production.
+Complete guide for deploying the Crop Risk Prediction Platform to **Render** (backend) and **Vercel** (frontend).
 
 ---
 
 ## Table of Contents
 
+- [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
-- [Deployment Options](#deployment-options)
-- [Docker Deployment](#docker-deployment)
-- [Cloud Deployment](#cloud-deployment)
+- [Render Backend Deployment](#render-backend-deployment)
+- [Vercel Frontend Deployment](#vercel-frontend-deployment)
 - [Environment Configuration](#environment-configuration)
 - [Database Setup](#database-setup)
-- [External Services](#external-services)
-- [Monitoring](#monitoring)
+- [Post-Deployment](#post-deployment)
+- [Monitoring & Maintenance](#monitoring--maintenance)
 - [Troubleshooting](#troubleshooting)
+- [Security Checklist](#security-checklist)
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     PRODUCTION SETUP                         │
+│                                                              │
+│  User Browser                                               │
+│      │                                                      │
+│      ▼                                                      │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │         Vercel (Frontend)                           │  │
+│  │ - https://crop-risk-web.vercel.app/               │  │
+│  │ - React + Vite application                         │  │
+│  │ - Static files + client-side routing               │  │
+│  └─────────────────────────────────────────────────────┘  │
+│      │ (HTTPS)                                             │
+│      ▼                                                      │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │          Render (Backend & Services)                │  │
+│  │                                                      │  │
+│  │  Web Service (crop-risk-api)                        │  │
+│  │  ├─ FastAPI on Port 8000                           │  │
+│  │  ├─ https://crop-risk-api.onrender.com/api/v1/    │  │
+│  │  └─ Health: /api/v1/health                         │  │
+│  │                                                      │  │
+│  │  Background Workers                                 │  │
+│  │  ├─ Celery Worker (tasks)                          │  │
+│  │  └─ Celery Beat (scheduler)                        │  │
+│  │                                                      │  │
+│  │  Managed Services                                   │  │
+│  │  ├─ PostgreSQL 14 (+ PostGIS)                      │  │
+│  │  └─ Redis 7                                        │  │
+│  └─────────────────────────────────────────────────────┘  │
+│      │                                                      │
+│      ├─────────────────────┬──────────────────────────┤   │
+│      ▼                     ▼                          ▼   │
+│   Database          Cache/Broker            External APIs │
+│   (PostgreSQL       (Redis)                 (GEE, Weather) │
+│    + PostGIS)                                             │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Prerequisites
 
-### Hardware Requirements
+### Account Setup
+- [Render](https://render.com) account (free tier available)
+- [Vercel](https://vercel.com) account (free tier available)
+- GitHub account with repository access
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| CPU | 2 cores | 4+ cores |
-| RAM | 4 GB | 8+ GB |
-| Storage | 20 GB | 50+ GB (for satellite data) |
-| Network | 10 Mbps | 100+ Mbps |
+### Local Requirements
+- Docker 20.10+ (for local testing)
+- Git
+- Node.js 18+ (for frontend build verification)
+- Python 3.11+ (optional, for local testing)
 
-### Software Requirements
-
-- Docker 20.10+ and Docker Compose 2.0+
-- OR Python 3.11+, PostgreSQL 14+, Redis 7+
-- SSL certificate (for HTTPS)
-- Domain name (optional but recommended)
+### Environment Preparation
+- Google Authentication configured for Google Earth Engine
+- (Optional) SMTP credentials for email notifications
+- (Optional) SMS API credentials for alerts
 
 ---
 
-## Deployment Options
+## Render Backend Deployment
 
-### Option 1: Docker Compose (Recommended)
+### Step 1: Connect Repository to Render
 
-Best for: Single server, VPS, small to medium scale
+1. Go to [Render Dashboard](https://dashboard.render.com)
+2. Click **"New +"** → **"Blueprint"**
+3. Connect GitHub if needed, select: `Kagabo183/Crop-risk-Production`
+4. Service name: `crop-risk`, Region: **Oregon**
+5. Click **"Create Blueprint"**
 
-### Option 2: Kubernetes
+Render will auto-create all services from `render.yaml`.
 
-Best for: Large scale, auto-scaling, high availability
+### Step 2: Environment Variables
 
-### Option 3: Cloud Platform
+In crop-risk-api → **Environment**, add:
+
+```
+SECRET_KEY=<generate: openssl rand -hex 32>
+ENVIRONMENT=production
+DEBUG=False
+GEE_PROJECT=principal-rhino-482514-f1
+SATELLITE_LOCAL_STORAGE_ENABLED=false
+```
+
+Database and Redis URLs auto-linked from services.
+
+### Step 3: Enable PostGIS
+
+```bash
+psql $DATABASE_URL -c "CREATE EXTENSION postgis;"
+```
+
+### Step 4: Verify
+
+```bash
+curl https://crop-risk-api.onrender.com/api/v1/health
+```
+
+---
+
+## Vercel Frontend Deployment
+
+### Step 1: Deploy Frontend
+
+#### Option A: CLI
+```bash
+npm install -g vercel
+cd web-app && vercel --prod
+```
+
+#### Option B: Dashboard
+1. Vercel → **Add New** → **Project**
+2. Import: `Kagabo183/Crop-risk-Production`
+3. Root: `web-app`, Build: `npm run build`, Out: `dist`
+4. **Environment** → `VITE_API_URL=https://crop-risk-api.onrender.com`
+5. **Deploy**
+
+### Step 2: Verify
+
+Visit `https://crop-risk-web.vercel.app` and test API connectivity.
+
+---
 
 Best for: Managed services, minimal DevOps
 
