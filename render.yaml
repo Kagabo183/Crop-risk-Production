@@ -5,7 +5,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     region: oregon
-    plan: starter
+    plan: free
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -43,7 +43,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/docker/worker.Dockerfile
     region: oregon
-    plan: starter
+    plan: free
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -79,7 +79,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/docker/beat.Dockerfile
     region: oregon
-    plan: starter
+    plan: free
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -112,12 +112,12 @@ services:
   - type: redis
     name: crop-risk-redis
     region: oregon
-    plan: starter
+    plan: free
     ipAllowList: []
 
 databases:
   - name: crop-risk-db
     databaseName: crop_risk_db
     region: oregon
-    plan: starter
+    plan: free
     postgresMajorVersion: 14
