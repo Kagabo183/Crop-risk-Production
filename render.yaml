@@ -1,23 +1,12 @@
----
-# Render Deployment Blueprint
-# Defines services for the Crop Risk Prediction Platform
-# Deploy: https://dashboard.render.com/new/blueprint
-
 services:
-  # FastAPI Web Service
   - type: web
     name: crop-risk-api
+    repo: https://github.com/Kagabo183/Crop-risk-Production
     runtime: docker
+    dockerfilePath: ./backend/Dockerfile
     region: oregon
     plan: starter
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: .
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    port: 8000
-    healthCheckPath: /api/v1/health
-    healthCheckInterval: 30
-    healthCheckTimeout: 10
-    healthCheckStartTimeout: 120
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -27,16 +16,6 @@ services:
         value: info
       - key: PYTHONUNBUFFERED
         value: "1"
-      - key: GEE_PROJECT
-        value: principal-rhino-482514-f1
-      - key: SATELLITE_LOCAL_STORAGE_ENABLED
-        value: "false"
-      - key: ENABLE_SATELLITE_MONITORING
-        value: "true"
-      - key: ENABLE_DISEASE_FORECASTING
-        value: "true"
-      - key: ENABLE_ML_MODELS
-        value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: crop-risk-db
@@ -56,14 +35,13 @@ services:
       - key: SECRET_KEY
         sync: false
 
-  # Celery Worker Background Service
   - type: worker
     name: crop-risk-worker
+    repo: https://github.com/Kagabo183/Crop-risk-Production
     runtime: docker
+    dockerfilePath: ./backend/Dockerfile
     region: oregon
     plan: starter
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: .
     startCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
     envVars:
       - key: ENVIRONMENT
@@ -91,14 +69,13 @@ services:
       - key: SECRET_KEY
         sync: false
 
-  # Celery Beat Scheduler Background Service
   - type: worker
     name: crop-risk-beat
+    repo: https://github.com/Kagabo183/Crop-risk-Production
     runtime: docker
+    dockerfilePath: ./backend/Dockerfile
     region: oregon
     plan: starter
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: .
     startCommand: celery -A app.tasks.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     envVars:
       - key: ENVIRONMENT
@@ -126,19 +103,14 @@ services:
       - key: SECRET_KEY
         sync: false
 
-  # Redis Service (for Celery)
   - type: redis
     name: crop-risk-redis
     region: oregon
     plan: starter
-    ipAllowList: []
 
-# Databases
 databases:
   - name: crop-risk-db
-    databaseName: crop_risk_db
     engine: postgres
-    ipAllowList: []
-    plan: starter
     region: oregon
-    postgresMajorVersion: 14
+    plan: starter
+    version: 14
