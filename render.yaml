@@ -2,41 +2,22 @@
 # Render Deployment Blueprint
 # Defines services for the Crop Risk Prediction Platform
 # Deploy: https://dashboard.render.com/new/blueprint
-#
-# Services:
-# - FastAPI Backend Web Service (Port 8000)
-# - Celery Worker Background Worker
-# - Celery Beat Scheduler Background Worker
-# - PostgreSQL Database (Render Managed)
-# - Redis Cache (Render Managed)
 
 services:
-  # ============================================================================
-  # BackendAPI Web Service
-  # ============================================================================
+  # FastAPI Web Service
   - type: web
     name: crop-risk-api
     runtime: docker
-    region: oregon  # Change to your preferred region
-    plan: starter  # starter, standard, pro
-    
-    # Build configuration
+    region: oregon
+    plan: starter
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    
-    # Service startup
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    
-    # Port
     port: 8000
-    
-    # Health check
     healthCheckPath: /api/v1/health
-    healthCheckInterval: 30000  # 30 seconds
-    healthCheckTimeout: 10000   # 10 seconds
-    healthCheckStartTimeout: 120000  # 2 minutes (for model loading)
-    
-    # Environment variables
+    healthCheckInterval: 30
+    healthCheckTimeout: 10
+    healthCheckStartTimeout: 120
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -56,20 +37,14 @@ services:
         value: "true"
       - key: ENABLE_ML_MODELS
         value: "true"
-      
-      # Database URL from PostgreSQL service
       - key: DATABASE_URL
         fromDatabase:
           name: crop-risk-db
           property: connectionString
-      
-      # Redis URL from Redis service
       - key: REDIS_URL
         fromService:
           name: crop-risk-redis
           property: connectionString
-      
-      # Celery broker/result backend
       - key: CELERY_BROKER_URL
         fromService:
           name: crop-risk-redis
@@ -78,28 +53,18 @@ services:
         fromService:
           name: crop-risk-redis
           property: connectionString
-    
-    # Secrets (from environment section or Render dashboard)
-    envVars:
       - key: SECRET_KEY
-        sync: false  # Must be set in Render dashboard
+        sync: false
 
-  # ============================================================================
   # Celery Worker Background Service
-  # ============================================================================
   - type: background_worker
     name: crop-risk-worker
     runtime: docker
     region: oregon
     plan: starter
-    
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    
-    # Worker start command
     startCommand: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
-    
-    # Environment variables (inherits from web service)
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -107,39 +72,34 @@ services:
         value: "1"
       - key: LOG_LEVEL
         value: info
-      
-      # Database and Redis from services
       - key: DATABASE_URL
         fromDatabase:
           name: crop-risk-db
           property: connectionString
-      
       - key: REDIS_URL
         fromService:
           name: crop-risk-redis
           property: connectionString
-      
       - key: CELERY_BROKER_URL
         fromService:
           name: crop-risk-redis
           property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: crop-risk-redis
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
 
-  # ============================================================================
   # Celery Beat Scheduler Background Service
-  # ============================================================================
   - type: background_worker
     name: crop-risk-beat
     runtime: docker
     region: oregon
     plan: starter
-    
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
-    
-    # Beat scheduler start command
     startCommand: celery -A app.tasks.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    
-    # Environment variables
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -147,73 +107,38 @@ services:
         value: "1"
       - key: LOG_LEVEL
         value: info
-      
-      # Database and Redis from services
       - key: DATABASE_URL
         fromDatabase:
           name: crop-risk-db
           property: connectionString
-      
       - key: REDIS_URL
         fromService:
           name: crop-risk-redis
           property: connectionString
-      
       - key: CELERY_BROKER_URL
         fromService:
           name: crop-risk-redis
           property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: crop-risk-redis
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
 
-# ============================================================================
-# Managed Databases & Services
-# ============================================================================
-databases:
-  # PostgreSQL Database with PostGIS
-  - name: crop-risk-db
-    databaseName: crop_risk_db
-    engine: postgres
-    ipAllowList: []  # Allow all (change for security)
-    plan: starter
-    region: oregon
-    postgresMajorVersion: 14
-    
-    # Extensions needed
-    # Note: PostGIS extension must be enabled manually in Render dashboard
-    # or via SQL: CREATE EXTENSION IF NOT EXISTS postgis;
-
-# Redis Database (for Celery)
-services:
+  # Redis Service (for Celery)
   - type: redis
     name: crop-risk-redis
     region: oregon
     plan: starter
-    ipAllowList: []  # Allow all (change for security)
+    ipAllowList: []
 
-# ============================================================================
-# Deployment Notes
-# ============================================================================
-# 1. Create Render account and connect GitHub repository
-# 2. Add bluprints.yaml from Blueprint dashboard
-# 3. Create PostgreSQL database:
-#    - Plan: Starter
-#    - Region: Oregon (or your preferred)
-#    - Enable PostGIS extension: 
-#      - In Render dashboard, open database
-#      - Run SQL: CREATE EXTENSION IF NOT EXISTS postgis;
-# 4. Create Redis database:
-#    - Plan: Starter
-#    - Region: Same as PostgreSQL
-# 5. Set SECRET_KEY in Environment variables:
-#    - Generate: openssl rand -hex 32
-#    - Set in Render dashboard
-# 6. For Google Earth Engine:
-#    - Create service account in GCP
-#    - Add private key to environment or mount as volume
-# 7. Optional: Configure custom domain
-# 8. Monitor logs and health checks
-#
-# Accessing Services:
-# - Web API: https://crop-risk-api.onrender.com/api/v1/
-# - API Docs: https://crop-risk-api.onrender.com/api/v1/docs
-# - Database: Use Render dashboard or connection string
-# - Redis: Internal URL only (not exposed to internet)
+# Databases
+databases:
+  - name: crop-risk-db
+    databaseName: crop_risk_db
+    engine: postgres
+    ipAllowList: []
+    plan: starter
+    region: oregon
+    postgresMajorVersion: 14
