@@ -110,7 +110,7 @@ services:
 
 databases:
   - name: crop-risk-db
-    engine: postgres
+    databaseName: crop_risk_db
     region: oregon
     plan: starter
-    version: 14
+    postgresVersion: 14
