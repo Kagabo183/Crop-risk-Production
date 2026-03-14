@@ -57,7 +57,7 @@ services:
         sync: false
 
   # Celery Worker Background Service
-  - type: background_worker
+  - type: worker
     name: crop-risk-worker
     runtime: docker
     region: oregon
@@ -92,7 +92,7 @@ services:
         sync: false
 
   # Celery Beat Scheduler Background Service
-  - type: background_worker
+  - type: worker
     name: crop-risk-beat
     runtime: docker
     region: oregon
