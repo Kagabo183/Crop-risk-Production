@@ -11,6 +11,7 @@ import { getCurrentPosition } from '../utils/native'
 import { usePlatform } from '../context/PlatformContext'
 import { Link } from 'react-router-dom'
 import { useTitle } from '../context/TitleContext'
+import { useLanguage } from '../context/LanguageContext'
 
 const emptyForm = {
   name: '', district: '', sector: '', cell: '', village: '', province: '', crop_type: '',
@@ -33,8 +34,9 @@ const PROVINCE_MAP = {
 
 export default function Farms() {
   const { isWeb } = usePlatform()
-  const { user, hasRole } = useAuth()
+  const { hasRole } = useAuth()
   const { setTitle } = useTitle();
+  const { t } = useLanguage();
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
   const [loading, setLoading] = useState(true)
@@ -81,9 +83,9 @@ export default function Farms() {
   }
 
   useEffect(() => {
-    setTitle('My Farms');
+    setTitle(t('farms.my_farms'));
     loadData()
-  }, [])
+  }, [setTitle, t])
 
   const handleChange = (e) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -332,14 +334,14 @@ export default function Farms() {
         <div className="stat-card">
           <div className="stat-icon blue"><MapPin size={18} /></div>
           <div className="stat-info">
-            <h4>Total Registered</h4>
+            <h4>{t('farms.total_registered')}</h4>
             <div className="stat-value">{farms.length}</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><Leaf size={18} /></div>
           <div className="stat-info">
-            <h4>Total Area</h4>
+            <h4>{t('farms.total_area')}</h4>
             <div className="stat-value">
               {farms.reduce((s, f) => s + (f.size_hectares || f.area || 0), 0).toFixed(1)} ha
             </div>
@@ -348,7 +350,7 @@ export default function Farms() {
         <div className="stat-card">
           <div className="stat-icon cyan"><Droplets size={18} /></div>
           <div className="stat-info">
-            <h4>Unique Crops</h4>
+            <h4>{t('farms.unique_crops')}</h4>
             <div className="stat-value">
               {new Set(farms.flatMap(f => (f.crop_type || '').split(',').map(c => c.trim())).filter(Boolean)).size}
             </div>
@@ -358,7 +360,7 @@ export default function Farms() {
           <div className="stat-card">
             <div className="stat-icon orange"><Satellite size={18} /></div>
             <div className="stat-info">
-              <h4>With Data</h4>
+              <h4>{t('farms.with_data')}</h4>
               <div className="stat-value">{satellite.length}</div>
             </div>
           </div>
@@ -376,7 +378,7 @@ export default function Farms() {
           className="btn btn-primary"
           onClick={() => { setShowForm(!showForm); setEditingId(null); setFormData(emptyForm) }}
         >
-          {showForm ? <><X size={12} /> Cancel</> : <><Plus size={12} /> Register Farm</>}
+          {showForm ? <><X size={12} /> {t('btn.cancel')}</> : <><Plus size={12} /> {t('farms.add_new')}</>}
         </button>
       </div>
 
@@ -386,7 +388,7 @@ export default function Farms() {
       {showForm && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
-            <h3>{editingId ? 'Edit Farm' : 'Register New Farm'}</h3>
+            <h3>{editingId ? t('farms.edit') : t('farms.add.title')}</h3>
           </div>
           <div className="card-body">
             <form onSubmit={handleSubmit}>
@@ -395,7 +397,7 @@ export default function Farms() {
                 <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
                   <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>
                     <Search size={14} style={{ verticalAlign: -2, marginRight: 4 }} />
-                    Quick Fill from UPI (Official Land Parcel)
+                    {t('farms.upi_search')}
                   </label>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input
@@ -413,7 +415,7 @@ export default function Farms() {
                       disabled={upiSearching || !upiQuery.trim()}
                       style={{ whiteSpace: 'nowrap', padding: '6px 16px' }}
                     >
-                      {upiSearching ? 'Searching...' : 'Find Parcel'}
+                      {upiSearching ? t('farms.searching') : t('farms.find_parcel')}
                     </button>
                   </div>
                   {upiError && <div style={{ color: '#f87171', fontSize: 12, marginTop: 6 }}>{upiError}</div>}
@@ -443,7 +445,7 @@ export default function Farms() {
               )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
                 <div className="form-group">
-                  <label>Farm Name *</label>
+                  <label>{t('farms.name')}</label>
                   <input
                     className="form-control"
                     name="name"
@@ -454,7 +456,7 @@ export default function Farms() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Province</label>
+                  <label>{t('profile.field.province')}</label>
                   <select
                     className="form-control"
                     name="province"
@@ -464,12 +466,12 @@ export default function Farms() {
                     }}
                     required
                   >
-                    <option value="">Select province</option>
+                    <option value="">{t('profile.select.province')}</option>
                     {(LOCATIONS?.provinces || []).map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>District</label>
+                  <label>{t('profile.field.district')}</label>
                   <select
                     className="form-control"
                     name="district"
@@ -480,14 +482,14 @@ export default function Farms() {
                     disabled={!formData.province}
                     required
                   >
-                    <option value="">Select District</option>
+                    <option value="">{t('profile.select.district')}</option>
                     {(LOCATIONS.provinces.find(p => p.name === formData.province)?.districts || []).map(d => (
                       <option key={d.name} value={d.name}>{d.name}</option>
                     ))}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Sector</label>
+                  <label>{t('farms.sector')}</label>
                   <select
                     className="form-control"
                     name="sector"
@@ -503,7 +505,7 @@ export default function Farms() {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Cell</label>
+                  <label>{t('farms.cell')}</label>
                   <input
                     className="form-control"
                     name="cell"
@@ -513,7 +515,7 @@ export default function Farms() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Village</label>
+                  <label>{t('farms.village')}</label>
                   <input
                     className="form-control"
                     name="village"
@@ -523,7 +525,7 @@ export default function Farms() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Crop Types</label>
+                  <label>{t('farms.crop_types')}</label>
                   <input
                     className="form-control"
                     name="crop_type"
@@ -534,7 +536,7 @@ export default function Farms() {
                   <small style={{ color: 'var(--text-secondary)', fontSize: 11 }}>Comma-separated for multiple crops</small>
                 </div>
                 <div className="form-group">
-                  <label>Area (hectares)</label>
+                  <label>{t('farms.area')}</label>
                   <input
                     className="form-control"
                     name="area"
@@ -547,7 +549,7 @@ export default function Farms() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Latitude</label>
+                  <label>{t('farms.latitude')}</label>
                   <input
                     className="form-control"
                     name="latitude"
@@ -561,7 +563,7 @@ export default function Farms() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Longitude</label>
+                  <label>{t('farms.longitude')}</label>
                   <input
                     className="form-control"
                     name="longitude"
@@ -585,7 +587,7 @@ export default function Farms() {
                   style={{ fontSize: 13, padding: '6px 14px' }}
                 >
                   <Navigation size={14} />
-                  {geoLoading ? 'Getting location...' : '📍 Use My Location'}
+                  {geoLoading ? t('loading') : `📍 ${t('farms.btn.location')}`}
                 </button>
                 {editingId && formData.latitude && formData.longitude && (
                   <>
@@ -598,7 +600,7 @@ export default function Farms() {
                       title="Automatically detect farm boundary from satellite imagery (excludes forests)"
                     >
                       <Scan size={14} />
-                      {boundaryLoading ? 'Detecting...' : '🛰️ Auto-Detect Boundary'}
+                      {boundaryLoading ? t('loading') : `🛰️ ${t('farms.btn.boundary')}`}
                     </button>
                     <button
                       className="btn btn-secondary"
@@ -608,7 +610,7 @@ export default function Farms() {
                       title="Walk around your farm to record the boundary with GPS"
                     >
                       <Footprints size={14} />
-                      {showWalkMyFarm ? 'Hide Walk Tool' : '🚶 Walk My Farm'}
+                      {`🚶 ${t('farms.btn.walk')}`}
                     </button>
                     <button
                       className="btn btn-secondary"
@@ -618,7 +620,7 @@ export default function Farms() {
                       title="Find your official land parcel boundary by UPI or GPS location"
                     >
                       <MapPin size={14} />
-                      📋 Find My Parcel
+                      📋 {t('farms.btn.find_my_parcel')}
                     </button>
                   </>
                 )}
@@ -689,14 +691,14 @@ export default function Farms() {
               <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
                 <button className="btn btn-primary" type="submit" disabled={submitting}>
                   <Check size={16} />
-                  {submitting ? 'Saving...' : editingId ? 'Update Farm' : 'Register Farm'}
+                  {submitting ? t('loading') : editingId ? t('farms.edit') : t('farms.add_new')}
                 </button>
                 <button
                   className="btn btn-secondary"
                   type="button"
                   onClick={() => { setShowForm(false); setEditingId(null); setFormData(emptyForm) }}
                 >
-                  Cancel
+                  {t('btn.cancel')}
                 </button>
               </div>
             </form>
@@ -815,20 +817,20 @@ export default function Farms() {
                 <div className="card-body">
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Location</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.location')}</span>
                       <div style={{ fontWeight: 500 }}>{farm.location || '—'}</div>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Crop</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.crop_type')}</span>
                       <div style={{ fontWeight: 500 }}>{farm.crop_type || '—'}</div>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Size</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.size_short') || 'Size'}</span>
                       <div style={{ fontWeight: 500 }}>{farm.size_hectares || farm.area || '—'} ha</div>
                     </div>
                     {farm.latitude && (
                       <div>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Coords</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.coords') || 'Coords'}</span>
                         <div style={{ fontWeight: 500, fontSize: 11 }}>
                           {farm.latitude?.toFixed(4)}, {farm.longitude?.toFixed(4)}
                         </div>
@@ -836,13 +838,13 @@ export default function Farms() {
                     )}
                     {sat?.ndvi_date && (
                       <div>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Updated</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.updated') || 'Updated'}</span>
                         <div style={{ fontWeight: 500 }}>{formatDate(sat.ndvi_date)}</div>
                       </div>
                     )}
                     {sat?.data_source && (
                       <div>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>Source</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{t('farms.source') || 'Source'}</span>
                         <div style={{ fontWeight: 500 }}>{sat.data_source}</div>
                       </div>
                     )}
@@ -877,7 +879,7 @@ export default function Farms() {
                     <div style={{ marginTop: 10, padding: 8, borderRadius: 6, background: 'var(--bg-surface)', textAlign: 'center' }}>
                       <Satellite size={16} style={{ color: 'var(--text-secondary)', marginBottom: 2 }} />
                       <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                        {hasCoords ? 'No satellite data yet' : 'Add coordinates for monitoring'}
+                        {hasCoords ? t('farms.no_satellite') : t('farms.add_coords')}
                       </div>
                     </div>
                   )}
@@ -914,7 +916,7 @@ export default function Farms() {
                         </div>
                       ) : (
                         <button className="btn btn-sm btn-secondary" onClick={() => handleFetchSatellite(farm.id)}>
-                          <Satellite size={13} /> Fetch Data
+                          <Satellite size={13} /> {t('farms.fetch_data')}
                         </button>
                       )}
                     </div>
@@ -930,11 +932,11 @@ export default function Farms() {
         farms.length === 0 && !showForm && (
           <div className="empty-state">
             <MapPin size={48} />
-            <h3>No farms found</h3>
+            <h3>{t('farms.empty')}</h3>
             <p>
               {hasRole('agronomist')
                 ? `No registered farms found in ${user?.district} district.`
-                : 'Click "Register New Farm" to add your first farm'}
+                : t('farms.empty.desc')}
             </p>
           </div>
         )

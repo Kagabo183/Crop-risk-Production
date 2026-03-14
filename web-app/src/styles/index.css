@@ -774,40 +774,41 @@ input:focus, select:focus, textarea:focus {
   transition: width 0.5s ease;
 }
 
-/* Auth pages */
+/* Auth pages — dark green gradient matching mobile */
 .auth-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  background: radial-gradient(circle at top left, #2d5a32 0%, #1B3A1F 100%);
   padding: 24px;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 36px;
-  box-shadow: var(--shadow-md);
+  max-width: 420px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.5rem;
+  padding: 2.5rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 .auth-logo {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 1rem;
 }
 
 .auth-logo h1 {
   font-size: 22px;
   font-weight: 800;
-  color: var(--primary);
+  color: #fff;
 }
 
 .auth-logo p {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.5);
   margin-top: 4px;
 }
 
@@ -838,3 +839,501 @@ input:focus, select:focus, textarea:focus {
   text-align: center;
 }
 .empty-icon { opacity: 0.4; }
+
+/* ════════════════════════════════════════
+   HEADER USER AVATAR
+   ════════════════════════════════════════ */
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  padding: 4px 8px 4px 12px;
+  border-radius: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  transition: all var(--transition);
+}
+.header-user:hover {
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+.header-user-role {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.header-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+/* ════════════════════════════════════════
+   PROFILE PAGE
+   ════════════════════════════════════════ */
+.profile-page {
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.profile-completion-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: var(--warning-light);
+  border: 1px solid rgba(245,124,0,0.25);
+  border-radius: var(--radius-lg);
+  color: var(--warning);
+}
+.profile-completion-banner p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 2px 0 0;
+}
+.profile-completion-banner > div {
+  flex: 1;
+}
+.profile-completion-banner strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.profile-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.profile-card-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 28px 28px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-avatar-lg {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--green-600), var(--green-700));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.profile-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profile-header-info h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+.profile-username {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.profile-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  width: fit-content;
+  margin-top: 2px;
+}
+
+.profile-card-body {
+  padding: 24px 28px;
+}
+
+.profile-card-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.profile-card-section-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.profile-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.profile-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.profile-info-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.profile-info-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.profile-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.profile-edit-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.profile-edit-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.profile-msg {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.profile-msg.success {
+  background: var(--success-light);
+  color: var(--success);
+  border: 1px solid rgba(46,125,50,0.2);
+}
+.profile-msg.error {
+  background: var(--danger-light);
+  color: var(--danger);
+  border: 1px solid rgba(211,47,47,0.2);
+}
+
+.profile-section-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+}
+
+/* Role Request Options */
+.role-request-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.role-request-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+  background: var(--bg-card);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.role-request-option:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.role-request-option.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: 0 0 0 2px rgba(45,106,52,0.15);
+}
+.role-request-option input[type="radio"] { display: none; }
+.role-request-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  display: block;
+}
+.role-request-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 2px;
+}
+
+/* Role App Status */
+.role-app-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: var(--warning-light);
+  border: 1px solid rgba(245,124,0,0.2);
+  border-radius: var(--radius);
+}
+.role-app-status-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.role-app-status-icon.pending {
+  background: rgba(245,124,0,0.15);
+  color: var(--warning);
+}
+.role-app-status h4 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  margin: 0;
+}
+.role-app-status p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 2px 0 0;
+}
+.role-app-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ════════════════════════════════════════
+   ADMIN PANEL
+   ════════════════════════════════════════ */
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 6px;
+  box-shadow: var(--shadow-sm);
+}
+.admin-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: inherit;
+  position: relative;
+}
+.admin-tab:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+.admin-tab.active {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.admin-tab-count {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.admin-tab-badge {
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.admin-role-select {
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.admin-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.admin-app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.admin-app-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition);
+}
+.admin-app-card:hover {
+  box-shadow: var(--shadow);
+}
+.admin-app-card.pending {
+  border-color: rgba(245,124,0,0.3);
+}
+.admin-app-card.approved {
+  border-color: rgba(46,125,50,0.3);
+}
+.admin-app-card.rejected {
+  border-color: rgba(211,47,47,0.2);
+  opacity: 0.7;
+}
+
+.admin-app-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px 12px;
+}
+.admin-app-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.admin-app-card-header h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.admin-app-username {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.admin-app-clock {
+  margin-left: auto;
+  color: var(--warning);
+}
+
+.admin-app-card-body {
+  padding: 0 18px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.admin-app-role-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.admin-app-arrow {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.admin-app-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.admin-app-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* ════════════════════════════════════════
+   RESPONSIVE ENHANCEMENTS
+   ════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .profile-info-grid {
+    grid-template-columns: 1fr;
+  }
+  .profile-edit-row {
+    grid-template-columns: 1fr;
+  }
+  .profile-card-header {
+    padding: 20px;
+  }
+  .profile-card-body {
+    padding: 18px 20px;
+  }
+  .admin-app-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-tabs {
+    flex-direction: column;
+  }
+  .header-user-role {
+    display: none;
+  }
+}

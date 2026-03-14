@@ -13,7 +13,7 @@ import DiseaseForecasts from './pages/DiseaseForecasts'
 import MLModels from './pages/MLModels'
 import EarlyWarning from './pages/EarlyWarning'
 import UserManagement from './pages/UserManagement'
-import MoreMenu from './pages/MoreMenu'
+import Profile from './pages/Profile'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import { getHealth } from './api'
@@ -21,15 +21,15 @@ import { getHealth } from './api'
 const PAGE_TITLES = {
   '/': 'Dashboard Overview',
   '/farms': 'Farm Management',
+  '/predictions': 'Agronomic Risk Assessment',
+  '/alerts': 'Regional Alerts',
+  '/admin': 'Admin Panel',
+  '/profile': 'My Profile',
   '/disease-classifier': 'AI Disease Classifier',
-  '/risk-assessment': 'Agronomic Risk Assessment',
   '/stress-monitoring': 'Crop Stress Monitoring',
   '/satellite': 'Satellite Index Analysis',
   '/disease-forecasts': 'Outbreak Forecasts',
-  '/early-warning': 'Regional Alerts',
   '/ml-models': 'ML Model Engine',
-  '/users': 'System User Management',
-  '/more': 'Account & Settings',
 }
 
 function AppRoutes() {
@@ -44,7 +44,7 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#0f1419' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f4f1' }}>
         <div className="spinner" />
       </div>
     )
@@ -69,6 +69,22 @@ function AppRoutes() {
             <Farms />
           </ProtectedRoute>
         } />
+        <Route path="/predictions" element={
+          <ProtectedRoute roles={['admin', 'agronomist']}>
+            <RiskAssessment />
+          </ProtectedRoute>
+        } />
+        <Route path="/alerts" element={<ProtectedRoute><EarlyWarning /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+
+        {/* Admin Panel */}
+        <Route path="/admin" element={
+          <ProtectedRoute roles={['admin']}>
+            <UserManagement />
+          </ProtectedRoute>
+        } />
+
+        {/* Keep existing deep-link routes for tools accessible from dashboard */}
         <Route path="/disease-classifier" element={
           <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
             <DiseaseClassifier />
@@ -92,12 +108,10 @@ function AppRoutes() {
             <MLModels />
           </ProtectedRoute>
         } />
-        <Route path="/users" element={
-          <ProtectedRoute roles={['admin']}>
-            <UserManagement />
-          </ProtectedRoute>
-        } />
-        <Route path="/more" element={<ProtectedRoute><MoreMenu /></ProtectedRoute>} />
+
+        {/* Legacy redirects */}
+        <Route path="/users" element={<Navigate to="/admin" replace />} />
+        <Route path="/more" element={<Navigate to="/profile" replace />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
       </Routes>

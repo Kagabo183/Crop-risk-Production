@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useLanguage } from '../context/LanguageContext'
 import { Eye, EyeOff } from 'lucide-react'
 import './Auth.css'
 
@@ -11,6 +12,7 @@ export default function Login() {
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
     const { login } = useAuth()
+    const { t } = useLanguage()
     const navigate = useNavigate()
 
     const handleSubmit = async (e) => {
@@ -18,8 +20,12 @@ export default function Login() {
         setError('')
         setLoading(true)
         try {
-            await login(username, pin)
-            navigate('/')
+            const userData = await login(username, pin)
+            if (!userData.phone || !userData.district) {
+                navigate('/profile')
+            } else {
+                navigate('/')
+            }
         } catch (err) {
             setError(err.response?.data?.detail || 'Login failed. Please check your credentials.')
         } finally {
@@ -34,37 +40,37 @@ export default function Login() {
                     <div className="auth-logo">
                         <span className="auth-logo-icon">🌾</span>
                     </div>
-                    <h1>Crop Risk Platform</h1>
-                    <p>Rwanda Agricultural Monitoring System</p>
+                    <h1>{t('app.title')}</h1>
+                    <p>{t('app.subtitle')}</p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="auth-form">
-                    <h2>Sign In</h2>
+                    <h2>{t('auth.login.title')}</h2>
 
                     {error && <div className="auth-error">{error}</div>}
 
                     <div className="auth-field">
-                        <label htmlFor="username">Username</label>
+                        <label htmlFor="username">{t('auth.username')}</label>
                         <input
                             id="username"
                             type="text"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
-                            placeholder="e.g. johndoe"
+                            placeholder={t('auth.username.placeholder')}
                             required
                             autoFocus
                         />
                     </div>
 
                     <div className="auth-field">
-                        <label htmlFor="pin">5-Digit PIN</label>
+                        <label htmlFor="pin">{t('auth.pin')}</label>
                         <div className="password-wrapper">
                             <input
                                 id="pin"
                                 type={showPassword ? 'text' : 'password'}
                                 value={pin}
                                 onChange={(e) => setPin(e.target.value)}
-                                placeholder="•••••"
+                                placeholder={t('auth.pin.placeholder')}
                                 pattern="\d{5}"
                                 maxLength="5"
                                 inputMode="numeric"
@@ -82,11 +88,11 @@ export default function Login() {
                     </div>
 
                     <button type="submit" className="auth-btn" disabled={loading}>
-                        {loading ? 'Signing in...' : 'Sign In'}
+                        {loading ? t('auth.login.signing_in') : t('auth.login.btn')}
                     </button>
 
                     <p className="auth-switch">
-                        Don't have an account? <Link to="/register">Create one</Link>
+                        {t('auth.login.no_account')} <Link to="/register">{t('auth.login.create_one')}</Link>
                     </p>
                 </form>
             </div>

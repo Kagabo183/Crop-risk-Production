@@ -121,13 +121,6 @@ The Crop Risk Prediction Platform provides:
 | **Interactive maps** | View detected boundaries on Leaflet maps |
 | **User ownership & RBAC** | Farmers see only their farms, agronomists see district, admins see all |
 
-### Authentication & Security
-| Feature | Description |
-|---------|-------------|
-| **Simple access** | Login requires a simple Username (name or number) and a 5-digit PIN |
-| **Mobile friendly** | PIN authentication designed for easier mobile and quick field access |
-| **Role-Based Access** | Farmers (own farms), Agronomists (district), Admins (all access) |
-
 ### Satellite Monitoring (Real Data via Google Earth Engine)
 | Feature | Description |
 |---------|-------------|
@@ -287,16 +280,13 @@ Specialized expert models with fewer classes for higher accuracy. When a user se
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/crop-risk-backend.git
-cd crop-risk-backend
+git clone https://github.com/Kagabo183/Crop-Prediction-Staging.git
+cd Crop-Prediction-Staging
 
 # Copy environment file
 cp .env.example .env
 
-# Edit .env with your settings
-nano .env
-
-# Start all services
+# Start all services (includes PostgreSQL, Redis, Backend API, Celery Worker)
 docker-compose up -d
 
 # Check logs
@@ -306,40 +296,51 @@ docker-compose logs -f
 Services will be available at:
 - **Frontend Dashboard**: http://localhost:3000
 - **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **PostgreSQL**: localhost:5434
+- **API Docs**: http://localhost:8000/docs (Swagger UI)
+- **PostgreSQL**: localhost:5434 (default credentials: postgres/1234)
 - **Redis**: localhost:6379
 
-### Option 2: Manual Installation
+### Option 2: Manual Installation (Development)
 
 ```bash
-# 1. Install Python dependencies
-pip install -r backend/requirements.txt
+# 1. Create and activate Python virtual environment
+python -m venv venv
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
 
-# 2. Setup PostgreSQL
+# 2. Install Python dependencies
+pip install -r backend/requirements.txt
+pip install -r backend/requirements-dev.txt  # for development
+
+# 3. Setup PostgreSQL with PostGIS
+# Ensure PostgreSQL 14+ and PostGIS extension are installed
 psql -U postgres
 CREATE DATABASE crop_risk_db;
 \c crop_risk_db
 CREATE EXTENSION postgis;
 \q
 
-# 3. Configure environment
+# 4. Configure environment
 cp .env.example .env
-# Edit .env with your database credentials
+# Edit .env with your database credentials:
+# DATABASE_URL=postgresql://postgres:your_password@localhost:5434/crop_risk_db
+# REDIS_URL=redis://localhost:6379/0
 
-# 4. Run database migrations
+# 5. Run database migrations
 alembic -c backend/alembic.ini upgrade head
 
-# 5. Initialize disease models
-python -m scripts.generate_disease_predictions init
-
 # 6. Start the API server
-uvicorn app:app --reload --app-dir backend --host 0.0.0.0 --port 8000
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # 7. Start Celery worker (new terminal)
-celery -A app.tasks.celery_app worker --loglevel=info
+cd backend
+celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
 
-# 8. Start Celery beat scheduler (new terminal)
+# 8. Start Celery Beat scheduler (new terminal, optional)
+cd backend
 celery -A app.tasks.celery_app beat --loglevel=info
 ```
 
@@ -558,53 +559,61 @@ Monitor ML model availability and test inference.
 ### Required Environment Variables
 
 ```bash
-# Database
-DATABASE_URL=postgresql://postgres:password@localhost:5434/crop_risk_db
+# Database (PostgreSQL with PostGIS)
+DATABASE_URL=postgresql://postgres:1234@localhost:5434/crop_risk_db
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# Redis Cache & Task Broker
+REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 
-# Security
-SECRET_KEY=your-secret-key-minimum-32-characters
+# Security (JWT Authentication)
+SECRET_KEY=your-secret-key-minimum-32-characters-use-openssl-rand-hex-32
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Application Settings
+DEBUG=True  # Set to False in production
+PROJECT_NAME=Crop Risk Prediction Platform
 
 # ML Models
 MODEL_DIR=./backend/data/models
 
-# API Settings
-DEBUG=False
-PROJECT_NAME=Crop Risk Prediction Platform
+# Satellite Data Processing
+GEE_PROJECT=principal-rhino-482514-f1  # Google Earth Engine project ID
+# GEE_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+# GEE_PRIVATE_KEY_PATH=/app/data/earthengine/private-key.json
+
+# Optional: Disable local satellite storage
+SATELLITE_LOCAL_STORAGE_ENABLED=false
 ```
 
 ### Optional Environment Variables
 
 ```bash
-# Google Earth Engine (for real satellite data processing)
-# OAuth method (recommended for development)
-GEE_PROJECT=your-gcp-project-id  # e.g., principal-rhino-482514-f1
-# Credentials stored in: data/earthengine/credentials
+# Copernicus Climate Data (ERA5 reanalysis data)
+COPERNICUS_USERNAME=your-cds-username
+COPERNICUS_PASSWORD=your-cds-password
+# Credentials file: .cdsapirc (in project root)
 
-# OR Service Account method (for production)
-# GEE_SERVICE_ACCOUNT_EMAIL=your-account@project.iam.gserviceaccount.com
-# GEE_PRIVATE_KEY_PATH=/app/data/earthengine/private-key.json
-
-# Weather APIs (optional - system has fallbacks)
-ERA5_API_KEY=your-era5-key
+# Advanced Weather APIs (optional - system has fallbacks)
 NOAA_API_KEY=your-noaa-token
 IBM_EIS_API_KEY=your-ibm-key
 
-# Notifications
+# Email Notifications
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
+SMTP_PASSWORD=your-app-specific-password
 
+# SMS Notifications
 SMS_PROVIDER=africas_talking
-SMS_API_KEY=your-sms-key
+SMS_API_KEY=your-sms-api-key
 SMS_USERNAME=sandbox
+
+# Cloud Storage (optional)
+AWS_ACCESS_KEY_ID=your-aws-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret
+S3_BUCKET=your-bucket-name
 ```
 
 ---
@@ -624,35 +633,35 @@ curl -H "Authorization: Bearer YOUR_JWT_TOKEN" http://localhost:8000/api/v1/farm
 
 ### Main Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/farms` | GET, POST | List/create farms with Rwanda validation |
-| `/farms/{id}` | GET, PUT, DELETE | Farm CRUD operations |
-| `/farms/{id}/auto-detect-boundary` | POST | Auto-detect farm boundary from satellite imagery |
-| `/farms/{id}/save-boundary` | POST | Save farm boundary polygon (from auto-detection or manual drawing) |
-| `/stress-monitoring/health/{farm_id}` | GET | Vegetation health timeseries (all 5 indices) |
-| `/stress-monitoring/stress-assessment/{farm_id}` | GET | Composite health assessment (multi-index) |
-| `/stress-monitoring/drought-assessment/{farm_id}` | GET | Drought analysis |
-| `/stress-monitoring/water-stress/{farm_id}` | GET | Water stress analysis |
-| `/stress-monitoring/heat-stress/{farm_id}` | GET | Heat stress analysis |
-| `/stress-monitoring/trigger-download` | POST | Trigger satellite data fetch |
-| `/farm-satellite/` | GET | All farms with satellite data |
-| `/farm-satellite/history/{farm_id}` | GET | NDVI history for farm |
-| `/diseases/` | GET | List all disease models |
-| `/diseases/predict` | POST | Generate disease prediction |
-| `/diseases/forecast/weekly/{farm_id}` | GET | 7-day disease forecast |
-| `/weather/current/{farm_id}` | GET | Current weather conditions |
-| `/weather/forecast/{farm_id}` | GET | Weather forecast |
-| `/alerts/` | GET | List alerts |
-| `/ml/classify-disease` | POST | Classify disease from leaf image (per-crop or general model) |
-| `/ml/crop-models` | GET | List per-crop models with availability status |
-| `/ml/supported-diseases` | GET | List all supported plants and diseases |
-| `/ml/risk-assessment` | POST | Comprehensive ML risk assessment |
-| `/ml/predict-yield` | POST | Predict crop yield |
-| `/ml/detect-anomalies` | POST | Detect vegetation anomalies |
-| `/ml/forecast-health` | POST | Forecast health trends |
-| `/ml/models/status` | GET | ML model health status |
-| `/health` | GET | API health check |
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/farms` | GET, POST | List/create farms with Rwanda validation | ✅ |
+| `/farms/{id}` | GET, PUT, DELETE | Farm CRUD operations | ✅ |
+| `/farms/{id}/auto-detect-boundary` | POST | Auto-detect farm boundary from satellite | ✅ |
+| `/farms/{id}/save-boundary` | POST | Save farm boundary polygon | ✅ |
+| `/stress-monitoring/health/{farm_id}` | GET | Vegetation health timeseries (all 5 indices) | ✅ |
+| `/stress-monitoring/stress-assessment/{farm_id}` | GET | Composite health assessment (multi-index) | ✅ |
+| `/stress-monitoring/drought-assessment/{farm_id}` | GET | Drought analysis | ✅ |
+| `/stress-monitoring/water-stress/{farm_id}` | GET | Water stress analysis | ✅ |
+| `/stress-monitoring/heat-stress/{farm_id}` | GET | Heat stress analysis | ✅ |
+| `/stress-monitoring/trigger-download` | POST | Trigger satellite data fetch | ✅ |
+| `/farm-satellite/` | GET | All farms with satellite data | ✅ |
+| `/farm-satellite/history/{farm_id}` | GET | NDVI history for farm | ✅ |
+| `/diseases/` | GET | List all disease models | ✅ |
+| `/diseases/predict` | POST | Generate disease predictions | ✅ |
+| `/diseases/forecast/weekly/{farm_id}` | GET | 7-day disease forecast | ✅ |
+| `/weather/current/{farm_id}` | GET | Current weather conditions | ✅ |
+| `/weather/forecast/{farm_id}` | GET | Weather forecast (7-14 days) | ✅ |
+| `/alerts/` | GET | List user alerts | ✅ |
+| `/ml/classify-disease` | POST | Classify disease from leaf image | ✅ |
+| `/ml/crop-models` | GET | List per-crop models & status | ✅ |
+| `/ml/supported-diseases` | GET | List all supported plants/diseases | ✅ |
+| `/ml/risk-assessment` | POST | Comprehensive ML risk assessment | ✅ |
+| `/ml/predict-yield` | POST | Predict crop yield | ✅ |
+| `/ml/detect-anomalies` | POST | Detect vegetation anomalies | ✅ |
+| `/ml/forecast-health` | POST | Forecast health trends | ✅ |
+| `/ml/models/status` | GET | ML model health & availability | ✅ |
+| `/health` | GET | API health check | ❌ |
 
 ### Example Requests
 
@@ -1177,80 +1186,199 @@ crop-risk-backend/
 
 ```bash
 # Run all tests
+cd backend
 pytest
 
 # Run with coverage
 pytest --cov=app --cov-report=html
 
 # Run specific test file
-pytest backend/tests/test_farms.py
+pytest tests/test_farms.py -v
+
+# Run tests in Docker container
+docker-compose exec web pytest
 ```
 
-### Code Formatting
+### Code Formatting & Linting
 
 ```bash
-# Format code
+# Format code with Black
 black backend/
+
+# Sort imports with isort
 isort backend/
 
-# Lint
-flake8 backend/
+# Lint with flake8
+flake8 backend/ --max-line-length=120
+
+# Type check with mypy
+mypy backend/ --ignore-missing-imports
 ```
 
 ### Database Migrations
 
 ```bash
 # Create new migration
-alembic -c backend/alembic.ini revision --autogenerate -m "description"
+alembic -c backend/alembic.ini revision --autogenerate -m "description of changes"
 
-# Apply migrations
+# Apply all pending migrations
 alembic -c backend/alembic.ini upgrade head
 
-# Rollback
+# Rollback one migration
 alembic -c backend/alembic.ini downgrade -1
+
+# View migration history
+alembic -c backend/alembic.ini history
+
+# Run migrations in Docker
+docker-compose exec web alembic -c alembic.ini upgrade head
+```
+
+### Debugging
+
+```bash
+# View application logs
+docker-compose logs -f web
+
+# View Celery worker logs
+docker-compose logs -f worker
+
+# View database activity
+docker-compose logs -f db
+
+# Connect to PostgreSQL
+psql -h localhost -U postgres -d crop_risk_db -p 5434
+
+# Check Redis
+redis-cli -p 6379 ping
+
+# Inspect Celery tasks
+python -c "from app.tasks.celery_app import celery_app; print(celery_app.tasks)"
 ```
 
 ---
 
 ## Deployment
 
-### Docker Compose (Production)
+### Docker Compose (Recommended)
 
+**Start services:**
 ```bash
-# Build and start
-docker-compose -f docker-compose.yml up -d --build
+# Build images and start all services
+docker-compose up -d --build
 
-# Scale workers
-docker-compose up -d --scale crop-risk-worker=3
+# Verify services are healthy
+docker-compose ps
 
-# View logs
-docker-compose logs -f crop-risk-backend
+# Check logs
+docker-compose logs -f
+
+# Stop all services
+docker-compose down
 ```
 
-### Environment Checklist
+**Scale Celery workers for production:**
+```bash
+# Deploy 3 worker instances
+docker-compose up -d --scale worker=3
 
-- [ ] Set `DEBUG=False`
-- [ ] Configure strong `SECRET_KEY`
-- [ ] Set up PostgreSQL with proper credentials
-- [ ] Configure Redis with password (if exposed)
-- [ ] Set up Google Earth Engine service account
-- [ ] Configure weather API keys (optional)
-- [ ] Set up SMTP for email alerts
-- [ ] Configure SMS provider for alerts
+# View worker status
+docker-compose ps
+```
+
+**Database operations:**
+```bash
+# Run migrations
+docker-compose exec web alembic -c alembic.ini upgrade head
+
+# Connect to PostgreSQL
+docker-compose exec db psql -U postgres -d crop_risk_db
+
+# Backup database
+docker-compose exec db pg_dump -U postgres crop_risk_db > backup.sql
+
+# View database logs
+docker-compose logs -f db
+```
+
+### Production Deployment Checklist
+
+**Security:**
+- [ ] Set `DEBUG=False` in `.env`
+- [ ] Generate strong `SECRET_KEY` (use: `openssl rand -hex 32`)
+- [ ] Use PostgreSQL with strong, unique password
+- [ ] Configure Redis password for production
+- [ ] Use HTTPS with valid SSL certificate
+- [ ] Configure CORS properly (restrict origins)
+- [ ] Set secure cookie flags (`Secure`, `HttpOnly`, `SameSite`)
+
+**Data Integration:**
+- [ ] Set up Google Earth Engine service account (`GEE_PROJECT`)
+- [ ] Configure GEE OAuth credentials in `data/earthengine/`
+- [ ] Set Copernicus Climate Data credentials (`.cdsapirc`)
+- [ ] Configure weather API keys (NOAA, IBM, etc. - optional)
+
+**Monitoring & Alerts:**
+- [ ] Set up SMTP for email notifications
+- [ ] Configure SMS provider (Africa's Talking, Twilio, etc.)
+- [ ] Set up application monitoring (Sentry, New Relic, etc.)
+- [ ] Configure health check endpoint monitoring
+- [ ] Set up database backup automation
+
+**Performance:**
+- [ ] Scale Celery workers based on farm count
+- [ ] Configure Redis persistence and eviction policy
+- [ ] Set up PostgreSQL connection pooling
+- [ ] Enable query caching and indexes
+- [ ] Configure CDN for static assets (frontend)
 
 ### Health Check
 
 ```bash
+# Check API health
 curl http://localhost:8000/health
-```
 
-Expected response:
-```json
+# Expected response:
 {
   "status": "healthy",
+  "timestamp": "2026-02-17T10:30:45.123Z",
+  "version": "2.7.0",
   "database": "connected",
-  "redis": "connected"
+  "redis": "connected",
+  "services": {
+    "satellite_service": "ready",
+    "weather_service": "ready",
+    "ml_models": "ready"
+  }
 }
+```
+
+### Monitoring
+
+**View metrics:**
+```bash
+# Celery worker status
+celery -A app.tasks.celery_app inspect active
+celery -A app.tasks.celery_app inspect stats
+
+# Database connections
+psql -h localhost -U postgres -d crop_risk_db -c "SELECT count(*) FROM pg_stat_activity;"
+
+# Redis memory
+redis-cli INFO memory
+```
+
+### Backup & Recovery
+
+```bash
+# Backup PostgreSQL
+docker-compose exec db pg_dump -U postgres crop_risk_db > backup_$(date +%Y%m%d_%H%M%S).sql
+
+# Restore from backup
+cat backup.sql | docker-compose exec -T db psql -U postgres -d crop_risk_db
+
+# Backup models directory
+tar -czf models_backup_$(date +%Y%m%d).tar.gz data/models/
 ```
 
 ---
@@ -1343,6 +1471,17 @@ MIT License - see LICENSE file for details.
 
 ---
 
-**Version**: 2.7.0
-**Last Updated**: February 17, 2026
-**Maintainer**: Crop Risk Platform Team
+**Version**: 2.7.0  
+**Last Updated**: February 17, 2026  
+**Maintainer**: @Kagabo183  
+**License**: MIT
+
+---
+
+## Quick Links
+
+- **[API Reference](API_REFERENCE.md)** - Complete REST API documentation
+- **[ML Architecture](ML_ARCHITECTURE.md)** - Detailed ML system & models
+- **[Deployment Guide](DEPLOYMENT.md)** - Production deployment instructions
+- **[GET STARTED](GET_STARTED.md)** - Quick start guide for new users
+- **[GitHub Repository](https://github.com/Kagabo183/Crop-Prediction-Staging)** - Source code & issues

@@ -1,18 +1,29 @@
 import { useState, useEffect } from 'react'
 import { getUsers, changeUserRole, toggleUserActive } from '../api'
+import { Users, Shield, CheckCircle, XCircle, Clock } from 'lucide-react'
 
 const ROLE_COLORS = {
-    admin: '#e74c3c',
-    agronomist: '#3498db',
-    farmer: '#2ecc71',
+    admin: { color: '#D32F2F', bg: '#FFEBEE' },
+    agronomist: { color: '#0288D1', bg: '#E1F5FE' },
+    farmer: { color: '#2E7D32', bg: '#E8F5E9' },
 }
-
 const ROLE_OPTIONS = ['admin', 'agronomist', 'farmer']
+
+/* ── localStorage helpers ── */
+function getRoleApplications() {
+    try { return JSON.parse(localStorage.getItem('role_applications') || '[]') }
+    catch { return [] }
+}
+function saveRoleApplications(apps) {
+    localStorage.setItem('role_applications', JSON.stringify(apps))
+}
 
 export default function UserManagement() {
     const [users, setUsers] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
+    const [tab, setTab] = useState('users') // 'users' | 'applications'
+    const [applications, setApplications] = useState([])
 
     const fetchUsers = () => {
         setLoading(true)
@@ -22,7 +33,14 @@ export default function UserManagement() {
             .finally(() => setLoading(false))
     }
 
-    useEffect(() => { fetchUsers() }, [])
+    const loadApplications = () => {
+        setApplications(getRoleApplications())
+    }
+
+    useEffect(() => {
+        fetchUsers()
+        loadApplications()
+    }, [])
 
     const handleRoleChange = async (userId, newRole) => {
         try {
@@ -42,111 +60,229 @@ export default function UserManagement() {
         }
     }
 
+    const handleApprove = async (app) => {
+        try {
+            await changeUserRole(app.userId, app.requestedRole)
+            const apps = getRoleApplications().map(a =>
+                a.userId === app.userId && a.timestamp === app.timestamp
+                    ? { ...a, status: 'approved' } : a
+            )
+            saveRoleApplications(apps)
+            loadApplications()
+            fetchUsers()
+        } catch (err) {
+            alert(err.response?.data?.detail || 'Failed to approve role')
+        }
+    }
+
+    const handleReject = (app) => {
+        const apps = getRoleApplications().map(a =>
+            a.userId === app.userId && a.timestamp === app.timestamp
+                ? { ...a, status: 'rejected' } : a
+        )
+        saveRoleApplications(apps)
+        loadApplications()
+    }
+
+    const pendingApps = applications.filter(a => a.status === 'pending')
+    const processedApps = applications.filter(a => a.status !== 'pending')
+
     if (loading) {
         return <div style={{ textAlign: 'center', padding: '3rem' }}><div className="spinner" /></div>
     }
 
     return (
-        <div style={{ padding: '1.5rem' }}>
-            <div className="card" style={{ padding: '1.5rem' }}>
-                <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem' }}>User Management</h2>
-                <p style={{ color: 'var(--color-text-secondary)', margin: '0 0 1.5rem', fontSize: '0.875rem' }}>
-                    Manage user accounts, roles, and access levels.
-                </p>
-
-                {error && <div style={{ color: '#e74c3c', marginBottom: '1rem' }}>{error}</div>}
-
-                <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                                {['Name', 'Email', 'Role', 'District', 'Status', 'Actions'].map(h => (
-                                    <th key={h} style={{
-                                        textAlign: 'left', padding: '0.75rem', fontSize: '0.75rem',
-                                        textTransform: 'uppercase', letterSpacing: '0.5px',
-                                        color: 'var(--color-text-secondary)',
-                                    }}>{h}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {users.map(u => (
-                                <tr key={u.id} style={{
-                                    borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                    opacity: u.is_active ? 1 : 0.5,
-                                }}>
-                                    <td style={{ padding: '0.75rem', fontWeight: 600 }}>
-                                        {u.full_name || '—'}
-                                    </td>
-                                    <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>{u.email}</td>
-                                    <td style={{ padding: '0.75rem' }}>
-                                        <select
-                                            value={u.role}
-                                            onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                                            style={{
-                                                background: 'rgba(255,255,255,0.06)',
-                                                border: `1px solid ${ROLE_COLORS[u.role] || '#555'}`,
-                                                color: ROLE_COLORS[u.role] || '#fff',
-                                                borderRadius: '0.5rem',
-                                                padding: '0.35rem 0.5rem',
-                                                fontSize: '0.8rem',
-                                                fontWeight: 600,
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            {ROLE_OPTIONS.map(r => (
-                                                <option key={r} value={r} style={{ color: '#000' }}>
-                                                    {r.charAt(0).toUpperCase() + r.slice(1)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </td>
-                                    <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
-                                        {u.district || '—'}
-                                    </td>
-                                    <td style={{ padding: '0.75rem' }}>
-                                        <span style={{
-                                            display: 'inline-block',
-                                            padding: '0.2rem 0.6rem',
-                                            borderRadius: '1rem',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 600,
-                                            background: u.is_active ? 'rgba(46,204,113,0.15)' : 'rgba(231,76,60,0.15)',
-                                            color: u.is_active ? '#2ecc71' : '#e74c3c',
-                                        }}>
-                                            {u.is_active ? 'Active' : 'Inactive'}
-                                        </span>
-                                    </td>
-                                    <td style={{ padding: '0.75rem' }}>
-                                        <button
-                                            onClick={() => handleToggleActive(u.id)}
-                                            style={{
-                                                background: 'rgba(255,255,255,0.06)',
-                                                border: '1px solid rgba(255,255,255,0.12)',
-                                                color: u.is_active ? '#e74c3c' : '#2ecc71',
-                                                borderRadius: '0.5rem',
-                                                padding: '0.35rem 0.75rem',
-                                                fontSize: '0.8rem',
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            {u.is_active ? 'Deactivate' : 'Activate'}
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-
-                <div style={{
-                    marginTop: '1rem', padding: '0.75rem',
-                    background: 'rgba(255,255,255,0.03)', borderRadius: '0.75rem',
-                    fontSize: '0.8rem', color: 'var(--color-text-secondary)',
-                }}>
-                    Total: {users.length} users · {users.filter(u => u.is_active).length} active
-                </div>
+        <div className="admin-page">
+            {/* Tab Switcher */}
+            <div className="admin-tabs">
+                <button
+                    className={`admin-tab ${tab === 'users' ? 'active' : ''}`}
+                    onClick={() => setTab('users')}
+                >
+                    <Users size={16} />
+                    Users
+                    <span className="admin-tab-count">{users.length}</span>
+                </button>
+                <button
+                    className={`admin-tab ${tab === 'applications' ? 'active' : ''}`}
+                    onClick={() => { setTab('applications'); loadApplications() }}
+                >
+                    <Shield size={16} />
+                    Role Applications
+                    {pendingApps.length > 0 && (
+                        <span className="admin-tab-badge">{pendingApps.length}</span>
+                    )}
+                </button>
             </div>
+
+            {error && <div className="error-box" style={{ marginBottom: 16 }}>{error}</div>}
+
+            {/* Users Table */}
+            {tab === 'users' && (
+                <div className="card">
+                    <div className="card-header">
+                        <h3>All Users</h3>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                            {users.filter(u => u.is_active).length} active · {users.length} total
+                        </span>
+                    </div>
+                    <div className="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Username</th>
+                                    <th>Role</th>
+                                    <th>District</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {users.map(u => {
+                                    const rc = ROLE_COLORS[u.role] || ROLE_COLORS.farmer
+                                    return (
+                                        <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>
+                                            <td style={{ fontWeight: 600 }}>{u.full_name || '—'}</td>
+                                            <td>@{u.username}</td>
+                                            <td>
+                                                <select
+                                                    value={u.role}
+                                                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                                                    className="admin-role-select"
+                                                    style={{ borderColor: rc.color, color: rc.color }}
+                                                >
+                                                    {ROLE_OPTIONS.map(r => (
+                                                        <option key={r} value={r}>
+                                                            {r.charAt(0).toUpperCase() + r.slice(1)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </td>
+                                            <td>{u.district || '—'}</td>
+                                            <td>
+                                                <span className={`badge ${u.is_active ? 'healthy' : 'critical'}`}>
+                                                    {u.is_active ? 'Active' : 'Inactive'}
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <button
+                                                    className={`btn btn-sm ${u.is_active ? 'btn-danger' : 'btn-primary'}`}
+                                                    onClick={() => handleToggleActive(u.id)}
+                                                >
+                                                    {u.is_active ? 'Deactivate' : 'Activate'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Role Applications */}
+            {tab === 'applications' && (
+                <div className="admin-applications">
+                    {pendingApps.length === 0 && processedApps.length === 0 ? (
+                        <div className="empty-state">
+                            <Shield size={48} />
+                            <h3>No Role Applications</h3>
+                            <p>When users apply for new roles, their requests will appear here.</p>
+                        </div>
+                    ) : (
+                        <>
+                            {pendingApps.length > 0 && (
+                                <>
+                                    <h3 className="admin-section-title">Pending Applications</h3>
+                                    <div className="admin-app-grid">
+                                        {pendingApps.map((app, i) => (
+                                            <div key={i} className="admin-app-card pending">
+                                                <div className="admin-app-card-header">
+                                                    <div className="admin-app-avatar">
+                                                        {(app.fullName || app.username || '?')[0].toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <h4>{app.fullName || app.username}</h4>
+                                                        <span className="admin-app-username">@{app.username}</span>
+                                                    </div>
+                                                    <Clock size={18} className="admin-app-clock" />
+                                                </div>
+                                                <div className="admin-app-card-body">
+                                                    <div className="admin-app-role-change">
+                                                        <span className="badge" style={{
+                                                            background: ROLE_COLORS[app.currentRole]?.bg,
+                                                            color: ROLE_COLORS[app.currentRole]?.color,
+                                                        }}>{app.currentRole}</span>
+                                                        <span className="admin-app-arrow">→</span>
+                                                        <span className="badge" style={{
+                                                            background: ROLE_COLORS[app.requestedRole]?.bg,
+                                                            color: ROLE_COLORS[app.requestedRole]?.color,
+                                                        }}>{app.requestedRole}</span>
+                                                    </div>
+                                                    <span className="admin-app-date">
+                                                        {new Date(app.timestamp).toLocaleDateString()}
+                                                    </span>
+                                                </div>
+                                                <div className="admin-app-card-actions">
+                                                    <button className="btn btn-primary btn-sm" onClick={() => handleApprove(app)}>
+                                                        <CheckCircle size={14} /> Approve
+                                                    </button>
+                                                    <button className="btn btn-danger btn-sm" onClick={() => handleReject(app)}>
+                                                        <XCircle size={14} /> Reject
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+
+                            {processedApps.length > 0 && (
+                                <>
+                                    <h3 className="admin-section-title" style={{ marginTop: 28 }}>History</h3>
+                                    <div className="admin-app-grid">
+                                        {processedApps.map((app, i) => (
+                                            <div key={i} className={`admin-app-card ${app.status}`}>
+                                                <div className="admin-app-card-header">
+                                                    <div className="admin-app-avatar">
+                                                        {(app.fullName || app.username || '?')[0].toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <h4>{app.fullName || app.username}</h4>
+                                                        <span className="admin-app-username">@{app.username}</span>
+                                                    </div>
+                                                    {app.status === 'approved'
+                                                        ? <CheckCircle size={18} style={{ color: 'var(--success)' }} />
+                                                        : <XCircle size={18} style={{ color: 'var(--danger)' }} />
+                                                    }
+                                                </div>
+                                                <div className="admin-app-card-body">
+                                                    <div className="admin-app-role-change">
+                                                        <span className="badge" style={{
+                                                            background: ROLE_COLORS[app.currentRole]?.bg,
+                                                            color: ROLE_COLORS[app.currentRole]?.color,
+                                                        }}>{app.currentRole}</span>
+                                                        <span className="admin-app-arrow">→</span>
+                                                        <span className="badge" style={{
+                                                            background: ROLE_COLORS[app.requestedRole]?.bg,
+                                                            color: ROLE_COLORS[app.requestedRole]?.color,
+                                                        }}>{app.requestedRole}</span>
+                                                    </div>
+                                                    <span className={`badge ${app.status === 'approved' ? 'healthy' : 'critical'}`}>
+                                                        {app.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     )
 }

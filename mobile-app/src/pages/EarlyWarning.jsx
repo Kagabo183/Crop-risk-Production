@@ -3,6 +3,7 @@ import { usePlatform } from '../context/PlatformContext'
 import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
 import { getEarlyWarnings, fetchWeatherAll } from '../api'
 import { useTitle } from '../context/TitleContext'
+import { useLanguage } from '../context/LanguageContext'
 
 const LEVEL_COLORS = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706', low: '#16a34a' }
 const LEVEL_LABELS = { critical: 'Critical', high: 'High', moderate: 'Moderate', low: 'Low' }
@@ -10,6 +11,7 @@ const LEVEL_LABELS = { critical: 'Critical', high: 'High', moderate: 'Moderate',
 export default function EarlyWarning() {
   const { isWeb } = usePlatform()
   const { setTitle } = useTitle();
+  const { t } = useLanguage();
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [fetching, setFetching] = useState(false)
@@ -24,9 +26,9 @@ export default function EarlyWarning() {
   }
 
   useEffect(() => {
-    setTitle('Alerts');
+    setTitle(t('warning.alerts'));
     load()
-  }, [])
+  }, [setTitle, t])
 
   const handleFetchWeather = async () => {
     setFetching(true)
@@ -39,7 +41,7 @@ export default function EarlyWarning() {
     setFetching(false)
   }
 
-  if (loading) return <div className="loading"><div className="spinner" /><p>Analyzing farm conditions...</p></div>
+  if (loading) return <div className="loading"><div className="spinner" /><p>{t('warning.analyzing')}</p></div>
 
   const alerts = data?.alerts || []
   const summary = data?.summary || {}
@@ -56,14 +58,14 @@ export default function EarlyWarning() {
       <div className="card">
         <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ flex: 1 }}>
-            <h3 style={{ margin: 0, fontSize: 14 }}>Early Warning System</h3>
+            <h3 style={{ margin: 0, fontSize: 14 }}>{t('warning.system')}</h3>
             <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-secondary)' }}>
-              Weather + NDVI anomaly + growth stage analysis
+              {t('warning.desc')}
             </p>
           </div>
           <button className="btn btn-sm btn-primary" onClick={handleFetchWeather} disabled={fetching}>
             <CloudRain size={14} />
-            {fetching ? 'Fetching...' : 'Weather'}
+            {fetching ? t('warning.fetching') : t('warning.weather')}
           </button>
           <button className="btn btn-sm btn-secondary" onClick={load}>
             <RefreshCw size={14} />
@@ -81,7 +83,7 @@ export default function EarlyWarning() {
               <Shield size={16} />
             </div>
             <div className="stat-info">
-              <h4>{LEVEL_LABELS[level]}</h4>
+              <h4>{t(`warning.level.${level}`) || LEVEL_LABELS[level]}</h4>
               <div className="stat-value">{summary[level] || 0}</div>
             </div>
           </div>
@@ -90,7 +92,7 @@ export default function EarlyWarning() {
 
       {/* Risk Chart */}
       <div className="card">
-        <div className="card-header"><h3>Risk Scores</h3></div>
+        <div className="card-header"><h3>{t('warning.risk_scores')}</h3></div>
         <div className="card-body">
           {chartData.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -110,14 +112,14 @@ export default function EarlyWarning() {
               ))}
             </div>
           ) : (
-            <div className="empty-state" style={{ padding: '20px 12px' }}><Shield size={28} /><h3>No alert data</h3></div>
+            <div className="empty-state" style={{ padding: '20px 12px' }}><Shield size={28} /><h3>{t('warning.no_data')}</h3></div>
           )}
         </div>
       </div>
 
       {/* Alert Cards */}
       <div className="card">
-        <div className="card-header"><h3>Alerts ({alerts.length})</h3></div>
+        <div className="card-header"><h3>{t('warning.alerts')} ({alerts.length})</h3></div>
         <div className="card-body">
           {alerts.map(a => (
             <div key={a.farm_id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -127,7 +129,7 @@ export default function EarlyWarning() {
                   <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 6 }}>{a.crop_type}</span>
                 </div>
                 <span className={`badge ${a.alert_level === 'low' ? 'healthy' : a.alert_level}`}>
-                  {a.alert_level} {a.combined_score}%
+                  {t(`warning.level.${a.alert_level}`) || a.alert_level} {a.combined_score}%
                 </span>
               </div>
 

@@ -1,16 +1,50 @@
 import axios from 'axios'
 import { Capacitor } from '@capacitor/core'
 
-// On Android: we use adb reverse tcp:8000 tcp:8000 so localhost works on physical devices too
-// On iOS/Web: localhost works as usual
-const API_BASE = Capacitor.isNativePlatform()
-  ? 'http://192.168.1.101:8000/api/v1'
-  : '/api/v1'
+/**
+ * Auto-detect the correct backend server based on connection type.
+ */
+function getInitialApiBaseUrl() {
+  if (!Capacitor.isNativePlatform()) {
+    return '/api/v1' // Web falls back to relative paths for proxy
+  }
+
+  // Define possible backend URLs in order of preference
+  return [
+    'http://localhost:8000/api/v1',         // 1. USB Debugging (ADB reverse)
+    'http://10.0.2.2:8000/api/v1',          // 2. Android Emulator
+    'http://192.168.1.101:8000/api/v1',     // 3. Same Wi-Fi Network
+    'http://41.216.119.113/api/v1'          // 4. Public Internet (No port 8000)
+  ]
+}
+
+const backendUrls = getInitialApiBaseUrl()
+const activeApiBase = Array.isArray(backendUrls) ? backendUrls[3] : backendUrls // Default to public IP
 
 const api = axios.create({
-  baseURL: API_BASE,
-  timeout: 30000,
+  baseURL: activeApiBase,
+  timeout: 10000, 
 })
+
+// Auto-detect the fastest available backend on app startup if native
+if (Capacitor.isNativePlatform()) {
+  const detectBackend = async () => {
+    for (const url of backendUrls) {
+      try {
+        const testBase = url.replace('/api/v1', '')
+        // We do a fast ping to the health endpoint with a short timeout
+        await axios.get(`${testBase}/api/v1/health`, { timeout: 2000 })
+        console.log(`[API] Backend connected successfully at: ${url}`)
+        api.defaults.baseURL = url
+        break // Stop at the first successful connection
+      } catch (err) {
+        console.log(`[API] Failed to reach: ${url}`)
+      }
+    }
+  }
+  
+  detectBackend()
+}
 
 // ── JWT Token Interceptor ──
 api.interceptors.request.use((config) => {

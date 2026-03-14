@@ -152,7 +152,7 @@ export default function Dashboard() {
             <div className="quick-actions-row">
               <Link to="/disease-classifier" className="action-tile-mini">
                  <div className="action-tile-icon red"><Bug size={20} /></div>
-                 <span>Scan Crops</span>
+                 <span>Disease Classifier</span>
               </Link>
               <Link to="/farms" className="action-tile-mini">
                  <div className="action-tile-icon blue"><MapPin size={20} /></div>
@@ -280,7 +280,7 @@ export default function Dashboard() {
           <Link to="/disease-classifier" className="stat-card" style={{ textDecoration: 'none' }}>
             <div className="stat-icon red"><Bug size={18} /></div>
             <div className="stat-info">
-              <h4>Analyze Samples</h4>
+              <h4>Disease Classifier</h4>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Identify crop diseases via AI</div>
             </div>
           </Link>

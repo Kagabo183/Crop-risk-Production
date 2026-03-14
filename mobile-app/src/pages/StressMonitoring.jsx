@@ -10,10 +10,12 @@ import {
   getVegetationIndices, getDroughtAssessment, getWaterStress, getHeatStress,
 } from '../api'
 import { useTitle } from '../context/TitleContext'
+import { useLanguage } from '../context/LanguageContext'
 
 export default function StressMonitoring() {
   const [farms, setFarms] = useState([])
   const { setTitle } = useTitle();
+  const { t } = useLanguage();
   const [selectedFarm, setSelectedFarm] = useState('')
   const [stress, setStress] = useState(null)
   const [health, setHealth] = useState([])
@@ -27,7 +29,7 @@ export default function StressMonitoring() {
 
   // Load user from localStorage
   useEffect(() => {
-    setTitle('Stress Monitor');
+    setTitle(t('stress.title'));
     const storedUser = localStorage.getItem('user')
     if (storedUser) {
       try {
@@ -36,7 +38,7 @@ export default function StressMonitoring() {
         console.error('Failed to parse user from localStorage')
       }
     }
-  }, [])
+  }, [setTitle, t])
 
   // Helper to check if user has any of the specified roles
   const hasRole = (...roles) => {
@@ -100,13 +102,13 @@ export default function StressMonitoring() {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <div className="form-group" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
-            <label>Select Farm</label>
+            <label>{t('stress.select_farm')}</label>
             <select className="form-control" value={selectedFarm} onChange={e => setSelectedFarm(Number(e.target.value))}>
               {farms.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
           </div>
           <button className="btn btn-primary" onClick={loadData} disabled={loading}>
-            {loading ? 'Loading...' : 'Refresh'}
+            {loading ? t('loading') : t('stress.refresh')}
           </button>
         </div>
       </div>
@@ -137,15 +139,14 @@ export default function StressMonitoring() {
                   <AlertTriangle size={20} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
                   <div style={{ flex: 1 }}>
                     <strong style={{ color: '#92400e', display: 'block', marginBottom: 4 }}>
-                      ⚠️ Data Accuracy Warning
+                      ⚠️ {t('stress.accuracy_warning')}
                     </strong>
                     <p style={{ fontSize: 14, margin: '0 0 8px 0', color: '#78350f' }}>
-                      This farm ({farmArea?.toFixed(1)} ha) doesn't have a defined boundary polygon. Satellite data is being
-                      sampled from a 50m circular buffer (~{bufferAreaHa.toFixed(1)} ha), which is {ratio.toFixed(1)}x larger than your farm.
+                      {(t('stress.accuracy_desc1') || '').replace('{area}', farmArea?.toFixed(1) || '').replace('{buffer}', bufferAreaHa.toFixed(1)).replace('{ratio}', ratio.toFixed(1))}
                     </p>
                     <p style={{ fontSize: 13, margin: 0, color: '#78350f' }}>
-                      <strong>Impact:</strong> Health scores may include data from neighboring farms, forests, or roads.
-                      {hasRole('agronomist', 'admin') && ' Add a boundary polygon in the farm settings for accurate analysis.'}
+                      <strong>{t('stress.impact')}</strong> {t('stress.accuracy_desc2')}
+                      {hasRole('agronomist', 'admin') && t('stress.add_boundary')}
                     </p>
                   </div>
                 </div>
@@ -156,7 +157,7 @@ export default function StressMonitoring() {
         return null
       })()}
 
-      {loading && <div className="loading"><div className="spinner" /><p>Loading stress data...</p></div>}
+      {loading && <div className="loading"><div className="spinner" /><p>{t('stress.loading')}</p></div>}
 
       {stress && !loading && (
         <>
@@ -165,9 +166,9 @@ export default function StressMonitoring() {
             <div className="stat-card">
               <div className="stat-icon green"><Activity size={22} /></div>
               <div className="stat-info">
-                <h4>Health Score</h4>
+                <h4>{t('stress.health_score')}</h4>
                 <div className="stat-value">{stress.health_score?.toFixed(0) ?? '—'}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>out of 100</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('stress.out_of_100')}</div>
               </div>
             </div>
             <div className="stat-card">
@@ -178,7 +179,7 @@ export default function StressMonitoring() {
                 <AlertTriangle size={22} />
               </div>
               <div className="stat-info">
-                <h4>Stress Level</h4>
+                <h4>{t('stress.level')}</h4>
                 <div className="stat-value" style={{ textTransform: 'capitalize', color: stressColor(stress.stress_level) }}>
                   {stress.stress_level || 'none'}
                 </div>
@@ -187,7 +188,7 @@ export default function StressMonitoring() {
             <div className="stat-card">
               <div className="stat-icon orange"><Activity size={22} /></div>
               <div className="stat-info">
-                <h4>Stress Score</h4>
+                <h4>{t('stress.score')}</h4>
                 <div className="stat-value">{stress.stress_score?.toFixed(0) ?? '—'}</div>
               </div>
             </div>
@@ -195,7 +196,7 @@ export default function StressMonitoring() {
               <div className="stat-card">
                 <div className="stat-icon red"><AlertTriangle size={22} /></div>
                 <div className="stat-info">
-                  <h4>Primary Stress</h4>
+                  <h4>{t('stress.primary')}</h4>
                   <div className="stat-value" style={{ fontSize: 18, textTransform: 'capitalize' }}>
                     {stress.primary_stress}
                   </div>
@@ -222,10 +223,10 @@ export default function StressMonitoring() {
                     borderLeft: `4px solid ${stress.stress_level === 'severe' || stress.stress_level === 'high' ? '#f59e0b' : '#22c55e'}`,
                     borderRadius: 4
                   }}>
-                    <strong>💡 Recommended Action:</strong> {stress.action}
+                    <strong>💡 {t('stress.action')}</strong> {stress.action}
                     {stress.action_days_min && stress.action_days_max && (
                       <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
-                        ⏰ Timeline: Take action within {stress.action_days_min}-{stress.action_days_max} days
+                        ⏰ {(t('stress.timeline') || '').replace('{min}', stress.action_days_min).replace('{max}', stress.action_days_max)}
                       </span>
                     )}
                   </div>
@@ -237,7 +238,7 @@ export default function StressMonitoring() {
           {/* Stress Breakdown */}
           {stress.stress_breakdown && (
             <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header"><h3>Stress Breakdown</h3></div>
+              <div className="card-header"><h3>{t('stress.breakdown')}</h3></div>
               <div className="card-body">
                 <div className="stress-bars">
                   {Object.entries(stress.stress_breakdown).map(([type, raw]) => {
@@ -266,7 +267,7 @@ export default function StressMonitoring() {
           {indices?.indices && (
             <div className="card" style={{ marginBottom: 20 }}>
               <div className="card-header">
-                <h3>Current Vegetation Indices</h3>
+                <h3>{t('stress.indices')}</h3>
                 {indices.acquisition_date && (
                   <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                     {formatDate(indices.acquisition_date)}
@@ -291,7 +292,7 @@ export default function StressMonitoring() {
           {/* Health Time Series */}
           {health.length > 0 && (
             <div className="card" style={{ marginBottom: 20 }}>
-              <div className="card-header"><h3>Vegetation Health History (90 days)</h3></div>
+              <div className="card-header"><h3>{t('stress.history')}</h3></div>
               <div className="card-body">
                 <ResponsiveContainer width="100%" height={180}>
                   <AreaChart data={health}>
@@ -317,7 +318,7 @@ export default function StressMonitoring() {
             {drought && (
               <div className="card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> Drought Stress</h3>
+                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> {t('stress.drought')}</h3>
                   <span className={`badge ${drought.level}`} style={{ textTransform: 'capitalize' }}>{drought.level}</span>
                 </div>
                 <div className="card-body">
@@ -325,7 +326,7 @@ export default function StressMonitoring() {
                     <div style={{ fontSize: 32, fontWeight: 600, color: drought.score >= 60 ? 'var(--danger)' : drought.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
                       {drought.score}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Drought Score (0-100)</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('stress.drought.score')}</div>
                   </div>
                   {/* Display role-appropriate message */}
                   {(drought.message || drought.message_farmer || drought.message_technical) && (
@@ -346,10 +347,10 @@ export default function StressMonitoring() {
                       borderRadius: 4,
                       marginBottom: 12
                     }}>
-                      <strong>💡 Recommended Action:</strong> {drought.action}
+                      <strong>💡 {t('stress.action')}</strong> {drought.action}
                       {drought.action_days_min && drought.action_days_max && (
                         <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                          ⏰ Timeline: {drought.action_days_min}-{drought.action_days_max} days
+                          ⏰ {(t('stress.timeline') || 'Timeline: Take action within {min}-{max} days').replace('{min}', drought.action_days_min).replace('{max}', drought.action_days_max)}
                         </span>
                       )}
                     </div>
@@ -365,7 +366,7 @@ export default function StressMonitoring() {
                     </div>
                     {drought.rainfall_deficit_percent != null && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Rainfall Deficit</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('stress.drought.deficit')}</span>
                         <strong style={{ color: drought.rainfall_deficit_percent > 50 ? 'var(--danger)' : 'var(--text)' }}>
                           {drought.rainfall_deficit_percent.toFixed(1)}%
                         </strong>
@@ -373,7 +374,7 @@ export default function StressMonitoring() {
                     )}
                     {drought.ndvi_trend != null && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Trend</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('stress.ndvi_trend')}</span>
                         <strong style={{ color: drought.ndvi_trend < 0 ? 'var(--danger)' : 'var(--success)' }}>
                           {drought.ndvi_trend > 0 ? '+' : ''}{drought.ndvi_trend.toFixed(4)}
                         </strong>
@@ -386,7 +387,7 @@ export default function StressMonitoring() {
             {water && (
               <div className="card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3><Droplets size={16} style={{ verticalAlign: -2 }} /> Water Stress</h3>
+                  <h3><Droplets size={16} style={{ verticalAlign: -2 }} /> {t('stress.water')}</h3>
                   <span className={`badge ${water.level}`} style={{ textTransform: 'capitalize' }}>{water.level}</span>
                 </div>
                 <div className="card-body">
@@ -394,7 +395,7 @@ export default function StressMonitoring() {
                     <div style={{ fontSize: 32, fontWeight: 600, color: water.score >= 60 ? 'var(--danger)' : water.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
                       {water.score}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Water Stress Score (0-100)</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('stress.water.score')}</div>
                   </div>
                   {/* Display role-appropriate message */}
                   {(water.message || water.message_farmer || water.message_technical) && (
@@ -415,10 +416,10 @@ export default function StressMonitoring() {
                       borderRadius: 4,
                       marginBottom: 12
                     }}>
-                      <strong>💡 Recommended Action:</strong> {water.action}
+                      <strong>💡 {t('stress.action')}</strong> {water.action}
                       {water.action_days_min && water.action_days_max && (
                         <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                          ⏰ Timeline: {water.action_days_min}-{water.action_days_max} days
+                          ⏰ {(t('stress.timeline') || 'Timeline: Take action within {min}-{max} days').replace('{min}', water.action_days_min).replace('{max}', water.action_days_max)}
                         </span>
                       )}
                     </div>
@@ -430,7 +431,7 @@ export default function StressMonitoring() {
                     </div>
                     {water.ndvi_decline_rate != null && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Decline Rate</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('stress.ndvi_decline')}</span>
                         <strong style={{ color: water.ndvi_decline_rate < -0.02 ? 'var(--danger)' : 'var(--text)' }}>
                           {water.ndvi_decline_rate.toFixed(4)}
                         </strong>
@@ -443,7 +444,7 @@ export default function StressMonitoring() {
             {heat && (
               <div className="card">
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> Heat Stress</h3>
+                  <h3><Sun size={16} style={{ verticalAlign: -2 }} /> {t('stress.heat')}</h3>
                   <span className={`badge ${heat.level}`} style={{ textTransform: 'capitalize' }}>{heat.level}</span>
                 </div>
                 <div className="card-body">
@@ -451,7 +452,7 @@ export default function StressMonitoring() {
                     <div style={{ fontSize: 32, fontWeight: 600, color: heat.score >= 60 ? 'var(--danger)' : heat.score >= 40 ? 'var(--warning)' : 'var(--success)' }}>
                       {heat.score}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Heat Stress Score (0-100)</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('stress.heat.score')}</div>
                   </div>
                   {/* Display role-appropriate message */}
                   {(heat.message || heat.message_farmer || heat.message_technical) && (
@@ -472,10 +473,10 @@ export default function StressMonitoring() {
                       borderRadius: 4,
                       marginBottom: 12
                     }}>
-                      <strong>💡 Recommended Action:</strong> {heat.action}
+                      <strong>💡 {t('stress.action')}</strong> {heat.action}
                       {heat.action_days_min && heat.action_days_max && (
                         <span style={{ display: 'block', marginTop: 4, fontSize: 12, color: 'var(--text-secondary)' }}>
-                          ⏰ Timeline: {heat.action_days_min}-{heat.action_days_max} days
+                          ⏰ {(t('stress.timeline') || 'Timeline: Take action within {min}-{max} days').replace('{min}', heat.action_days_min).replace('{max}', heat.action_days_max)}
                         </span>
                       )}
                     </div>
@@ -483,15 +484,15 @@ export default function StressMonitoring() {
                   <div style={{ display: 'grid', gap: 8 }}>
                     {heat.heat_stress_days != null && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Heat Stress Days</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('stress.heat.days')}</span>
                         <strong style={{ color: heat.heat_stress_days > 3 ? 'var(--danger)' : 'var(--text)' }}>
-                          {heat.heat_stress_days} {heat.heat_stress_days === 1 ? 'day' : 'days'}
+                          {heat.heat_stress_days} {heat.heat_stress_days === 1 ? t('stress.heat.day') || 'day' : t('stress.heat.days_plural') || 'days'}
                         </strong>
                       </div>
                     )}
                     {heat.ndvi_decline_rate != null && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0' }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>NDVI Decline Rate</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('stress.ndvi_decline')}</span>
                         <strong style={{ color: heat.ndvi_decline_rate < -0.02 ? 'var(--danger)' : 'var(--text)' }}>
                           {heat.ndvi_decline_rate.toFixed(4)}
                         </strong>
@@ -508,8 +509,8 @@ export default function StressMonitoring() {
       {!stress && !loading && !error && (
         <div className="empty-state">
           <Activity size={48} />
-          <h3>Select a farm to monitor stress</h3>
-          <p>View drought, heat, water, and nutrient stress indicators</p>
+          <h3>{t('stress.empty')}</h3>
+          <p>{t('stress.empty.desc')}</p>
         </div>
       )}
     </>

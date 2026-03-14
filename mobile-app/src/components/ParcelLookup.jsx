@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { searchParcels, findParcelByLocation, saveFarmBoundary } from '../api'
 import { Search, MapPin, Check, X, Loader2, Navigation, Redo } from 'lucide-react'
 import { getCurrentPosition } from '../utils/native'
+import { useLanguage } from '../context/LanguageContext'
 
 /**
  * ParcelLookup – find official LAIS cadastral parcel by UPI or GPS location.
@@ -15,6 +16,7 @@ import { getCurrentPosition } from '../utils/native'
  *   onClose  – callback to close the component
  */
 export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClose }) {
+    const { t } = useLanguage();
     // Search state
     const [upiQuery, setUpiQuery] = useState('')
     const [searching, setSearching] = useState(false)
@@ -167,7 +169,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
             const res = await searchParcels(upiQuery.trim())
             const data = res.data
             if (data.length === 0) {
-                setError('No parcels found matching that UPI. Check the number and try again.')
+                setError(t('parcel.error_upi') || 'No parcels found matching that UPI. Check the number and try again.')
             } else {
                 setParcels(data)
                 drawParcels(data)
@@ -191,7 +193,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
             const res = await findParcelByLocation(latitude, longitude, 100)
             const data = res.data
             if (data.length === 0) {
-                setError('No registered parcels found at your location. Try searching by UPI instead.')
+                setError(t('parcel.error_gps') || 'No registered parcels found at your location. Try searching by UPI instead.')
             } else {
                 setParcels(data)
                 drawParcels(data)
@@ -240,7 +242,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                 <div style={styles.header}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <MapPin size={22} color="#6366f1" />
-                        <h3 style={styles.title}>Find My Parcel</h3>
+                        <h3 style={styles.title}>{t('parcel.title')}</h3>
                     </div>
                     <button onClick={onClose} style={styles.closeBtn}>
                         <X size={20} />
@@ -250,8 +252,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                 {/* Search controls */}
                 {!saved && (
                     <div style={styles.searchSection}>
-                        <p style={styles.hint}>
-                            Search by your <b>UPI number</b> or use GPS to find the official parcel at your location.
+                        <p style={styles.hint} dangerouslySetInnerHTML={{ __html: t('parcel.hint') || 'Search by your <b>UPI number</b> or use GPS to find the official parcel at your location.' }}>
                         </p>
 
                         {/* UPI search */}
@@ -261,7 +262,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                                 value={upiQuery}
                                 onChange={(e) => setUpiQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                placeholder="Enter UPI number..."
+                                placeholder={t('parcel.placeholder')}
                                 style={styles.input}
                             />
                             <button
@@ -273,13 +274,13 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                                 }}
                             >
                                 {searching ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
-                                Search
+                                {t('parcel.search')}
                             </button>
                         </div>
 
                         {/* Divider */}
                         <div style={styles.divider}>
-                            <span style={styles.dividerText}>or</span>
+                            <span style={styles.dividerText}>{t('parcel.or')}</span>
                         </div>
 
                         {/* GPS search */}
@@ -296,7 +297,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                             ) : (
                                 <Navigation size={16} />
                             )}
-                            {gpsSearching ? 'Finding parcel...' : 'Find Parcel at My Location'}
+                            {gpsSearching ? (t('parcel.finding') || 'Finding parcel...') : (t('parcel.find_gps') || 'Find Parcel at My Location')}
                         </button>
                     </div>
                 )}
@@ -315,7 +316,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                 {parcels.length > 1 && !selectedParcel && (
                     <div style={styles.resultsList}>
                         <p style={styles.resultsTitle}>
-                            Found {parcels.length} parcels — tap one to select:
+                            {(t('parcel.found_count') || 'Found {count} parcels — tap one to select:').replace('{count}', parcels.length)}
                         </p>
                         {parcels.map((p) => (
                             <button
@@ -341,7 +342,7 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                 {/* Selected parcel details */}
                 {selectedParcel && !saved && (
                     <div style={styles.selectedCard}>
-                        <h4 style={{ margin: '0 0 8px', color: '#f1f5f9' }}>Selected Parcel</h4>
+                        <h4 style={{ margin: '0 0 8px', color: '#f1f5f9' }}>{t('parcel.selected')}</h4>
                         <div style={styles.detailGrid}>
                             <div style={styles.detailItem}>
                                 <span style={styles.detailLabel}>UPI</span>
@@ -380,11 +381,11 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                                 ) : (
                                     <Check size={16} />
                                 )}
-                                {saving ? 'Saving...' : 'Use This Boundary'}
+                                {saving ? (t('walk.saving') || 'Saving...') : (t('parcel.use_boundary') || 'Use This Boundary')}
                             </button>
                             <button onClick={handleReset} style={styles.resetBtn}>
                                 <Redo size={14} />
-                                Search Again
+                                {t('parcel.search_again')}
                             </button>
                         </div>
                     </div>
@@ -394,15 +395,15 @@ export default function ParcelLookup({ farmId, farmLat, farmLon, onSaved, onClos
                 {saved && (
                     <div style={styles.savedCard}>
                         <Check size={32} color="#10b981" />
-                        <h4 style={{ margin: '8px 0 4px', color: '#f1f5f9' }}>Boundary Saved!</h4>
+                        <h4 style={{ margin: '8px 0 4px', color: '#f1f5f9' }}>{t('parcel.saved_title')}</h4>
                         <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
-                            Your farm now has the official survey boundary from the LAIS cadastral database.
+                            {t('parcel.saved_desc')}
                             {selectedParcel?.area_hectares && (
-                                <> Area: <b>{selectedParcel.area_hectares} ha</b></>
+                                <> {t('walk.area') || 'Area'}: <b>{selectedParcel.area_hectares} ha</b></>
                             )}
                         </p>
                         <button onClick={onClose} style={{ ...styles.saveBtn, marginTop: 12 }}>
-                            Done
+                            {t('parcel.done') || 'Done'}
                         </button>
                     </div>
                 )}

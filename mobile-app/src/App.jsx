@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { TitleProvider } from './context/TitleContext'
+import { LanguageProvider } from './context/LanguageContext' // Added LanguageProvider import
 import MobileLayout from './components/MobileLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Dashboard from './pages/Dashboard'
@@ -10,6 +11,7 @@ import DiseaseClassifier from './pages/DiseaseClassifier'
 import StressMonitoring from './pages/StressMonitoring'
 import EarlyWarning from './pages/EarlyWarning'
 import MoreMenu from './pages/MoreMenu'
+import Profile from './pages/Profile'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import { getHealth } from './api'
@@ -59,6 +61,7 @@ function AppRoutes() {
         <Route path="/stress-monitoring" element={<ProtectedRoute><StressMonitoring /></ProtectedRoute>} />
         <Route path="/early-warning" element={<ProtectedRoute><EarlyWarning /></ProtectedRoute>} />
         <Route path="/more" element={<ProtectedRoute><MoreMenu /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
       </Routes>
@@ -68,10 +71,12 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
+    <LanguageProvider>
       <TitleProvider>
-        <AppRoutes />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </TitleProvider>
-    </AuthProvider>
+    </LanguageProvider>
   )
 }

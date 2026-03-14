@@ -22,8 +22,8 @@ import {
   getDailyAdvisory,
 } from '../api'
 import { formatDate } from '../utils/formatDate'
-import { compressImage, compressionSummary } from '../utils/imageCompressor'
 import { useTitle } from '../context/TitleContext'
+import { useLanguage } from '../context/LanguageContext'
 
 // ── Confidence colour helper ──────────────────────────────────────────────────
 const confColor = (c) =>
@@ -38,6 +38,7 @@ const priorityStyle = {
 
 export default function DiseaseClassifier() {
   const { setTitle } = useTitle()
+  const { t } = useLanguage()
 
   // ── Form state ──────────────────────────────────────────────────────────────
   const [file, setFile]         = useState(null)
@@ -67,7 +68,7 @@ export default function DiseaseClassifier() {
 
   // ── Initialisation ───────────────────────────────────────────────────────────
   useEffect(() => {
-    setTitle('Disease Check')
+    setTitle(t('disease.title'))
     getSupportedDiseases().then(r => setSupported(r.data)).catch(() => {})
     getCropModels().then(r => setCropModels(r.data.crop_models || [])).catch(() => {})
     loadHistory()
@@ -159,7 +160,7 @@ export default function DiseaseClassifier() {
       {/* ── Scan card ───────────────────────────────────────────────────────── */}
       <div className="card">
         <div className="card-header">
-          <h3>Scan Your Crop</h3>
+          <h3>{t('disease.title')}</h3>
           {supported && (
             <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
               {supported.total_classes} diseases · {supported.total_plants} crops
@@ -214,7 +215,7 @@ export default function DiseaseClassifier() {
                 onClick={() => cameraRef.current?.click()}
               >
                 <Camera size={18} />
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Take Photo</span>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{t('disease.take_photo')}</span>
               </button>
 
               {/* Gallery — secondary */}
@@ -224,7 +225,7 @@ export default function DiseaseClassifier() {
                 onClick={() => galleryRef.current?.click()}
               >
                 <Upload size={16} />
-                <span>Gallery</span>
+                <span>{t('disease.choose_gallery') || 'Gallery'}</span>
               </button>
 
               {/* Hidden file inputs */}
@@ -268,7 +269,7 @@ export default function DiseaseClassifier() {
                     padding: '6px 10px', fontSize: 12, gap: 4,
                   }}
                 >
-                  <RefreshCw size={13} /> Retake
+                  <RefreshCw size={13} /> {t('btn.cancel')}
                 </button>
               </div>
 
@@ -307,8 +308,8 @@ export default function DiseaseClassifier() {
                   disabled={loading}
                 >
                   {loading
-                    ? <><Loader2 size={18} className="spinner" style={{ border: 'none' }} /> Analysing…</>
-                    : <><Camera size={18} /> Analyse Disease</>
+                    ? <><Loader2 size={18} className="spinner" style={{ border: 'none' }} /> {t('disease.analyzing')}</>
+                    : <><Camera size={18} /> {t('disease.title')}</>
                   }
                 </button>
               )}
@@ -351,7 +352,7 @@ export default function DiseaseClassifier() {
       {result && (
         <div className="card">
           <div className="card-header">
-            <h3>Result</h3>
+            <h3>{t('disease.results')}</h3>
             {result.model_type && (
               <span style={{
                 fontSize: 10, padding: '2px 7px', borderRadius: 10,
@@ -392,7 +393,7 @@ export default function DiseaseClassifier() {
                 <div style={{ fontSize: 26, fontWeight: 800, color: confColor(result.confidence) }}>
                   {(result.confidence * 100).toFixed(0)}%
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>confidence</div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{t('disease.confidence')}</div>
               </div>
             </div>
 
@@ -414,7 +415,7 @@ export default function DiseaseClassifier() {
                 border: '1px solid var(--border)',
               }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
-                  💊 What to do now
+                  💊 {t('disease.recommendations')}
                 </div>
 
                 {result.treatment.urgency && (
@@ -468,7 +469,7 @@ export default function DiseaseClassifier() {
 
             <button className="btn btn-secondary" onClick={reset}
               style={{ justifyContent: 'center' }}>
-              <Camera size={15} /> Scan Another Photo
+              <Camera size={15} /> {t('disease.analyze_another')}
             </button>
           </div>
         </div>

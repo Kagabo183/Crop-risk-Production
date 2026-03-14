@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Navigation, Square, Save, RotateCcw, X, MapPin, Clock, Ruler } from 'lucide-react'
 import { saveFarmBoundary } from '../api'
 import { getCurrentPosition, watchPosition } from '../utils/native'
+import { useLanguage } from '../context/LanguageContext'
 
 /**
  * Walk My Farm — GPS Boundary Tracking Component
@@ -60,6 +61,7 @@ function totalDistance(points) {
 }
 
 export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose }) {
+    const { t } = useLanguage();
     const [phase, setPhase] = useState('ready') // ready | walking | stopped | saving | saved
     const [points, setPoints] = useState([])
     const [accuracy, setAccuracy] = useState(null)
@@ -277,7 +279,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
     // Save boundary to backend
     const saveBoundary = useCallback(async () => {
         if (points.length < 3) {
-            setError('Need at least 3 GPS points to create a farm boundary. Walk more of the perimeter.')
+            setError(t('walk.error_min_points') || 'Need at least 3 GPS points to create a farm boundary. Walk more of the perimeter.')
             return
         }
 
@@ -299,10 +301,10 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
             setPhase('saved')
             if (onSaved) onSaved(calculateAreaHectares(points))
         } catch (err) {
-            setError(err.response?.data?.detail || 'Failed to save boundary. Please try again.')
+            setError(err.response?.data?.detail || t('parcel.error_gps') || 'Failed to save boundary. Please try again.')
             setPhase('stopped')
         }
-    }, [points, farmId, onSaved])
+    }, [points, farmId, onSaved, t])
 
     // Cleanup on unmount
     useEffect(() => {
@@ -345,9 +347,9 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 20 }}>🚶</span>
                     <div>
-                        <div style={{ fontWeight: 700, fontSize: 15, color: '#9a3412' }}>Walk My Farm</div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: '#9a3412' }}>{t('walk.title')}</div>
                         <div style={{ fontSize: 11, color: '#c2410c' }}>
-                            Walk around your farm to record the boundary
+                            {t('walk.subtitle')}
                         </div>
                     </div>
                 </div>
@@ -384,25 +386,25 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                     {[
                         {
                             icon: <MapPin size={14} />,
-                            label: 'Points',
+                            label: t('walk.points') || 'Points',
                             value: points.length,
                             color: '#3b82f6',
                         },
                         {
                             icon: <Clock size={14} />,
-                            label: 'Time',
+                            label: t('walk.time') || 'Time',
                             value: formatTime(elapsed),
                             color: '#8b5cf6',
                         },
                         {
                             icon: <Ruler size={14} />,
-                            label: 'Distance',
+                            label: t('walk.distance') || 'Distance',
                             value: dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`,
                             color: '#f97316',
                         },
                         {
                             icon: <Navigation size={14} />,
-                            label: 'Area',
+                            label: t('walk.area') || 'Area',
                             value: area >= 0.01 ? `${area.toFixed(2)} ha` : '—',
                             color: '#16a34a',
                         },
@@ -457,12 +459,12 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                         }}
                     />
                     <span style={{ color: '#64748b' }}>
-                        GPS accuracy: <strong>{Math.round(accuracy)}m</strong>
+                        {t('walk.gps_accuracy') || 'GPS accuracy:'} <strong>{Math.round(accuracy)}m</strong>
                         {accuracy < 10
-                            ? ' — Excellent ✓'
+                            ? t('walk.gps_excellent') || ' — Excellent ✓'
                             : accuracy <= 30
-                                ? ' — Good ✓'
-                                : ' — Too poor, skipping! Move outside to open area'}
+                                ? t('walk.gps_good') || ' — Good ✓'
+                                : t('walk.gps_poor') || ' — Too poor, skipping! Move outside to open area'}
                     </span>
                 </div>
             )}
@@ -505,7 +507,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                         }}
                     >
                         <Navigation size={22} />
-                        Start Walking
+                        {t('walk.start') || 'Start Walking'}
                     </button>
                 )}
 
@@ -535,8 +537,8 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                     >
                         <Square size={22} />
                         {points.length < 3
-                            ? `Walking... (${points.length}/3 min points)`
-                            : 'Stop Walking'}
+                            ? (t('walk.walking') || 'Walking... ({pts}/3 min points)').replace('{pts}', points.length)
+                            : t('walk.stop') || 'Stop Walking'}
                     </button>
                 )}
 
@@ -562,7 +564,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                             }}
                         >
                             <Save size={22} />
-                            Save Boundary ({area.toFixed(2)} ha)
+                            {t('walk.save') || 'Save Boundary'} ({area.toFixed(2)} ha)
                         </button>
                         <button
                             onClick={resetWalk}
@@ -584,7 +586,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                             }}
                         >
                             <RotateCcw size={18} />
-                            Redo
+                            {t('walk.redo') || 'Redo'}
                         </button>
                     </>
                 )}
@@ -607,7 +609,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                             justifyContent: 'center',
                         }}
                     >
-                        Saving boundary...
+                        {t('walk.saving') || 'Saving boundary...'}
                     </div>
                 )}
 
@@ -630,7 +632,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                             gap: 8,
                         }}
                     >
-                        ✅ Boundary Saved! ({area.toFixed(2)} hectares)
+                        {(t('walk.saved') || '✅ Boundary Saved!')} ({area.toFixed(2)} {t('dash.farms.ha')})
                     </div>
                 )}
             </div>
@@ -645,13 +647,13 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                         lineHeight: 1.6,
                     }}
                 >
-                    <strong>How to use:</strong>
+                    <strong>{t('walk.how_to') || 'How to use:'}</strong>
                     <ol style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                        <li>Go to your farm and stand at one corner</li>
-                        <li>Press <strong>"Start Walking"</strong> and allow GPS</li>
-                        <li>Walk slowly around the entire perimeter of your farm</li>
-                        <li>When you return to the starting point, press <strong>"Stop Walking"</strong></li>
-                        <li>Review the boundary on the map, then press <strong>"Save"</strong></li>
+                        <li>{t('walk.step1')}</li>
+                        <li>{t('walk.step2')}</li>
+                        <li>{t('walk.step3')}</li>
+                        <li>{t('walk.step4')}</li>
+                        <li>{t('walk.step5')}</li>
                     </ol>
                 </div>
             )}
@@ -666,7 +668,7 @@ export default function WalkMyFarm({ farmId, farmLat, farmLon, onSaved, onClose 
                         textAlign: 'center',
                     }}
                 >
-                    🚶 Walk slowly around your farm boundary... Keep walking until you return to the start.
+                    {t('walk.walking_msg')}
                 </div>
             )}
 

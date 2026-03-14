@@ -3,21 +3,18 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard,
   MapPin,
-  Bug,
   ShieldAlert,
-  Activity,
-  Satellite,
-  TrendingUp,
-  Cpu,
   AlertTriangle,
+  Bug,
   Users,
+  UserCircle,
   LogOut,
 } from 'lucide-react'
 
 const ROLE_BADGE = {
-  admin: { label: 'Admin', color: '#e74c3c' },
-  agronomist: { label: 'Agronomist', color: '#3498db' },
-  farmer: { label: 'Farmer', color: '#2ecc71' },
+  admin: { label: 'Admin', color: '#D32F2F' },
+  agronomist: { label: 'Agronomist', color: '#0288D1' },
+  farmer: { label: 'Farmer', color: '#2E7D32' },
 }
 
 export default function Sidebar({ open, onClose }) {
@@ -28,34 +25,29 @@ export default function Sidebar({ open, onClose }) {
     {
       label: 'Overview', items: [
         { to: '/', icon: LayoutDashboard, text: 'Dashboard' },
-        ...(hasRole('admin', 'agronomist', 'farmer') ?
-          [{ to: '/farms', icon: MapPin, text: 'Farms' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/farms', icon: MapPin, text: 'Farms' }] : []),
       ]
     },
     {
       label: 'Analysis', items: [
-        ...(hasRole('admin', 'agronomist', 'farmer') ?
-          [{ to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' }] : []),
-        ...(hasRole('admin', 'agronomist') ?
-          [{ to: '/risk-assessment', icon: ShieldAlert, text: 'Risk Assessment' }] : []),
-        { to: '/stress-monitoring', icon: Activity, text: 'Stress Monitoring' },
-        { to: '/early-warning', icon: AlertTriangle, text: 'Early Warning' },
-      ]
-    },
-    {
-      label: 'Data', items: [
-        { to: '/satellite', icon: Satellite, text: 'Satellite Data' },
-        ...(hasRole('admin', 'agronomist') ?
-          [{ to: '/disease-forecasts', icon: TrendingUp, text: 'Disease Forecasts' }] : []),
-        ...(hasRole('admin', 'agronomist') ?
-          [{ to: '/ml-models', icon: Cpu, text: 'ML Models' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' }] : []),
+        ...(hasRole('admin', 'agronomist')
+          ? [{ to: '/predictions', icon: ShieldAlert, text: 'Predictions' }] : []),
+        { to: '/alerts', icon: AlertTriangle, text: 'Alerts' },
       ]
     },
     ...(hasRole('admin') ? [{
       label: 'Admin', items: [
-        { to: '/users', icon: Users, text: 'User Management' },
+        { to: '/admin', icon: Users, text: 'Admin Panel' },
       ],
     }] : []),
+    {
+      label: 'Account', items: [
+        { to: '/profile', icon: UserCircle, text: 'Profile' },
+      ]
+    },
   ]
 
   return (
@@ -94,11 +86,11 @@ export default function Sidebar({ open, onClose }) {
         <div className="sidebar-user">
           <div className="sidebar-user-info">
             <div className="sidebar-user-avatar">
-              {(user?.full_name || user?.email || '?')[0].toUpperCase()}
+              {(user?.full_name || user?.username || '?')[0].toUpperCase()}
             </div>
             <div className="sidebar-user-details">
-              <span className="sidebar-user-name" title={user?.full_name || user?.email}>
-                {user?.full_name || user?.email}
+              <span className="sidebar-user-name" title={user?.full_name || user?.username}>
+                {user?.full_name || user?.username}
               </span>
               <div className="sidebar-user-badges">
                 <span className="sidebar-user-role" style={{ background: badge.color + '22', color: badge.color }}>

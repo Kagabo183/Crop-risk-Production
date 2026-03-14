@@ -9,11 +9,13 @@ import { getFarms, getFarmSatellite, getModelStatus, getEarlyWarnings } from '..
 import { useAuth } from '../context/AuthContext'
 import { usePlatform } from '../context/PlatformContext'
 import { useTitle } from '../context/TitleContext'
+import { useLanguage } from '../context/LanguageContext'
 
 export default function Dashboard() {
   const { isWeb } = usePlatform()
   const { user, hasRole } = useAuth()
   const { setTitle } = useTitle();
+  const { t } = useLanguage();
   const isFarmer = hasRole('farmer') && !hasRole('admin', 'agronomist')
   const [farms, setFarms] = useState([])
   const [satellite, setSatellite] = useState([])
@@ -23,7 +25,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    setTitle('Dashboard');
+    setTitle(t('nav.dashboard'));
     Promise.allSettled([
       getFarms(),
       getFarmSatellite(),
@@ -42,7 +44,7 @@ export default function Dashboard() {
     })
   }, [])
 
-  if (loading) return <div className="loading"><div className="spinner" /><p>Loading...</p></div>
+  if (loading) return <div className="loading"><div className="spinner" /><p>{t('loading')}</p></div>
   if (error) return <div className="error-box">{error}</div>
 
   // Compute stats
@@ -69,10 +71,10 @@ export default function Dashboard() {
         <section className="welcome-banner">
           <div className="welcome-content">
             <h2 className="welcome-title">
-              Hello, <span>{user?.full_name?.split(' ')[0] || 'Farmer'}</span>
+              {t('dash.hello')}, <span>{user?.full_name?.split(' ')[0] || 'Farmer'}</span>
             </h2>
             <p className="welcome-subtitle">
-              Your field health overview for today
+              {t('dash.subtitle')}
             </p>
           </div>
           <div className="welcome-weather-mini">
@@ -87,11 +89,11 @@ export default function Dashboard() {
                  <Activity size={24} />
               </div>
               <div className="health-pulse-info">
-                 <span className="health-pulse-label">Overall Field Health</span>
+                 <span className="health-pulse-label">{t('dash.health.overall')}</span>
                  <div className="health-pulse-value">
                     {avgNdvi != null ? `${Math.round(avgNdvi * 100)}%` : '—'}
                     <span className="health-pulse-status">
-                       {avgNdvi >= 0.6 ? 'Optimal' : avgNdvi >= 0.4 ? 'Monitor' : 'Critical'}
+                       {avgNdvi >= 0.6 ? t('dash.health.optimal') : avgNdvi >= 0.4 ? t('dash.health.monitor') : t('dash.health.critical')}
                     </span>
                  </div>
               </div>
@@ -111,7 +113,7 @@ export default function Dashboard() {
               <div className="stat-card premium">
                 <div className="stat-icon blue"><MapPin size={18} /></div>
                 <div className="stat-info">
-                  <h4>Managed Farms</h4>
+                  <h4>{t('dash.stats.farms')}</h4>
                   <div className="stat-value" style={{ fontSize: 18 }}>{totalFarms}</div>
                 </div>
               </div>
@@ -119,7 +121,7 @@ export default function Dashboard() {
               <div className="stat-card premium">
                 <div className="stat-icon orange"><AlertTriangle size={18} /></div>
                 <div className="stat-info">
-                  <h4>At Risk</h4>
+                  <h4>{t('dash.stats.risk')}</h4>
                   <div className="stat-value" style={{ fontSize: 18 }}>{healthyCounts.stressed}</div>
                 </div>
               </div>
@@ -131,9 +133,9 @@ export default function Dashboard() {
                 <div className="card-header no-border">
                   <div className="header-with-icon">
                     <ShieldAlert size={18} className="text-warning" />
-                    <h3>Active Farm Alerts</h3>
+                    <h3>{t('dash.alerts.title')}</h3>
                   </div>
-                  <Link to="/early-warning" className="text-link">View Details</Link>
+                  <Link to="/early-warning" className="text-link">{t('dash.alerts.view')}</Link>
                 </div>
                 <div className="card-body pt-0">
                   <div className="alert-list">
@@ -142,7 +144,7 @@ export default function Dashboard() {
                         <div className={`severity-indicator ${a.alert_level}`} />
                         <span className="farm-name-text">{a.farm_name}</span>
                         <span className="alert-chip">
-                          {a.alert_level === 'critical' ? '🔴 Crisis' : '🟠 High'}
+                          {a.alert_level === 'critical' ? t('dash.alerts.critical') : t('dash.alerts.high')}
                         </span>
                       </div>
                     ))}
@@ -157,11 +159,11 @@ export default function Dashboard() {
               <div className="quick-actions-row">
                 <Link to="/disease-classifier" className="action-tile-mini">
                    <div className="action-tile-icon red"><Bug size={20} /></div>
-                   <span>Scan Crops</span>
+                   <span>{t('dash.actions.scan')}</span>
                 </Link>
                 <Link to="/farms" className="action-tile-mini">
                    <div className="action-tile-icon blue"><MapPin size={20} /></div>
-                   <span>Manage Fields</span>
+                   <span>{t('dash.actions.manage')}</span>
                 </Link>
               </div>
             </div>
@@ -172,15 +174,15 @@ export default function Dashboard() {
             {/* My Farms List */}
             <div className="card glass-card" style={{ height: '100%', marginBottom: 0 }}>
               <div className="card-header">
-                <h3>My Production Units</h3>
-                <Link to="/farms" className="text-link">Full List</Link>
+                <h3>{t('dash.farms.title')}</h3>
+                <Link to="/farms" className="text-link">{t('dash.farms.all')}</Link>
               </div>
               <div className="card-body p-0">
                 {farms.length === 0 ? (
                   <div className="empty-state-compact">
                     <div className="empty-icon"><MapPin size={32} /></div>
-                    <p>No production units found</p>
-                    <Link to="/farms" className="btn btn-primary btn-sm">Add First Farm</Link>
+                    <p>{t('dash.farms.empty')}</p>
+                    <Link to="/farms" className="btn btn-primary btn-sm">{t('dash.farms.add_first')}</Link>
                   </div>
                 ) : (
                   <div className="premium-farm-list">
@@ -195,7 +197,7 @@ export default function Dashboard() {
                           <div className="item-content">
                             <div className="item-title">{farm.name}</div>
                             <div className="item-subtitle">
-                              {farm.crop_type} • {farm.size_hectares || farm.area || '—'} ha
+                              {farm.crop_type} • {farm.size_hectares || farm.area || '—'} {t('dash.farms.ha')}
                             </div>
                           </div>
                           <div className="item-trailing">
@@ -205,7 +207,7 @@ export default function Dashboard() {
                                  <span className="unit">%</span>
                               </div>
                             ) : (
-                               <div className="no-data-tag">No Data</div>
+                               <div className="no-data-tag">{t('dash.farms.no_data')}</div>
                             )}
                           </div>
                         </Link>
