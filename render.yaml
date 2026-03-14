@@ -4,6 +4,7 @@ services:
     repo: https://github.com/Kagabo183/Crop-risk-Production
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     region: oregon
     plan: free
     envVars:
