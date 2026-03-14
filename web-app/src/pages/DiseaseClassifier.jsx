@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { usePlatform } from '../context/PlatformContext'
 import { Upload, Camera, AlertTriangle, CheckCircle, Loader2, Clock, ChevronDown, ChevronUp } from 'lucide-react'
-import { classifyDisease, getSupportedDiseases, getCropModels, getClassificationHistory } from '../api'
+import { classifyDisease, getSupportedDiseases, getCropModels, getClassificationHistory, pingApi } from '../api'
 import { formatDate } from '../utils/formatDate'
 
 export default function DiseaseClassifier() {
@@ -62,19 +62,26 @@ export default function DiseaseClassifier() {
     if (f && f.type.startsWith('image/')) handleFile(f)
   }, [handleFile])
 
+  const [loadingMsg, setLoadingMsg] = useState('')
+
   const classify = async () => {
     if (!file) return
     setLoading(true)
     setError(null)
     setResult(null)
     try {
+      // Wake up Render free-tier backend if it's sleeping
+      setLoadingMsg('Waking up server...')
+      await pingApi()
+      setLoadingMsg('Classifying disease...')
       const res = await classifyDisease(file, cropType || undefined)
       setResult(res.data)
       loadHistory()
     } catch (e) {
-      setError(e.response?.data?.detail || e.message || 'Classification failed')
+      setError(e.response?.data?.detail || e.message || 'Classification failed. Please try again.')
     }
     setLoading(false)
+    setLoadingMsg('')
   }
 
   const confidenceColor = (conf) => {
@@ -168,7 +175,7 @@ export default function DiseaseClassifier() {
               onClick={classify}
               disabled={!file || loading}
             >
-              {loading ? <><Loader2 size={16} className="spinner" style={{ border: 'none', borderTop: 'none' }} /> Analyzing...</> : <><Camera size={16} /> Classify Disease</>}
+              {loading ? <><Loader2 size={16} className="spinner" style={{ border: 'none', borderTop: 'none' }} /> {loadingMsg || 'Analyzing...'}</> : <><Camera size={16} /> Classify Disease</>}
             </button>
 
             {error && <div className="error-box" style={{ marginTop: 16 }}><AlertTriangle size={18} />{error}</div>}
@@ -192,7 +199,12 @@ export default function DiseaseClassifier() {
             {loading && (
               <div className="loading">
                 <div className="spinner" />
-                <p>Analyzing image with EfficientNet-B0...</p>
+                <p>{loadingMsg || 'Analyzing image with EfficientNet-B0...'}</p>
+                {loadingMsg === 'Waking up server...' && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                    Free-tier server is starting up, please wait...
+                  </p>
+                )}
               </div>
             )}
 

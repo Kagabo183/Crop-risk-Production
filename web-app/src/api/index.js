@@ -8,8 +8,11 @@ const BASE = import.meta.env.VITE_API_URL
 
 const api = axios.create({
   baseURL: BASE,
-  timeout: 30000,
+  timeout: 60000,   // 60s default — covers cold-start on Render free tier
 })
+
+// Wake up the Render backend before a slow ML request
+export const pingApi = () => api.get('/health', { timeout: 10000 }).catch(() => {})
 
 // ── JWT Token Interceptor ──
 api.interceptors.request.use((config) => {
@@ -113,6 +116,7 @@ export const classifyDisease = (file, cropType, farmId = null) => {
   return api.post('/ml/classify-disease', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
     params,
+    timeout: 120000,  // ML inference can take up to 2 min on free tier cold start
   })
 }
 export const getClassificationHistory = (limit = 20, farmId = null) =>
