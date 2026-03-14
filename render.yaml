@@ -113,4 +113,4 @@ databases:
     databaseName: crop_risk_db
     region: oregon
     plan: starter
-    postgresVersion: 14
+    postgresMajorVersion: 14
