@@ -52,18 +52,32 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - SATELLITE_LOCAL_STORAGE_ENABLED=false
       - MODEL_DIR=/app/data/models
-      - GEE_PROJECT=principal-rhino-482514-f1
+      - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
       - ./ml:/app/ml:cached
-      # Google Earth Engine credentials
+      # GEE service-account key (do NOT commit the JSON file to git).
+      # Place the key at ./Gee_Key/gee-service-account.json on the host.
+      - ./Gee_Key:/app/keys:ro
+      # Google Earth Engine OAuth credentials (legacy / application-default)
       - ./data/earthengine:/root/.config/earthengine:cached
-      # Copernicus (ERA5) configuration
+      # Copernicus (ERA5) cdsapi configuration
       - ./.cdsapirc:/root/.cdsapirc:ro
-
-  worker:
+    environment:
+      - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - SATELLITE_LOCAL_STORAGE_ENABLED=false
+      - MODEL_DIR=/app/data/models
+      - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
+      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
+      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
+      - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
+      - ERA5_API_KEY=${ERA5_API_KEY}
+      - NOAA_API_KEY=${NOAA_API_KEY}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -87,7 +101,8 @@ services:
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
       - ./ml:/app/ml:cached
-      # Google Earth Engine credentials for satellite tasks
+      # GEE service-account key
+      - ./Gee_Key:/app/keys:ro
       - ./data/earthengine:/root/.config/earthengine:cached
       # Copernicus (ERA5) configuration
       - ./.cdsapirc:/root/.cdsapirc:ro
@@ -99,7 +114,13 @@ services:
       - COPERNICUS_USERNAME=${COPERNICUS_USERNAME}
       - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD}
       - MODEL_DIR=/app/data/models
-      - GEE_PROJECT=principal-rhino-482514-f1
+      - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
+      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
+      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
+      - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
+      - ERA5_API_KEY=${ERA5_API_KEY}
+      - NOAA_API_KEY=${NOAA_API_KEY}
 
   beat:
     build:
@@ -125,6 +146,8 @@ services:
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
       - ./ml:/app/ml:cached
+      # GEE service-account key
+      - ./Gee_Key:/app/keys:ro
       - ./data/earthengine:/root/.config/earthengine:cached
       # Copernicus (ERA5) configuration
       - ./.cdsapirc:/root/.cdsapirc:ro
@@ -135,7 +158,13 @@ services:
       - SATELLITE_LOCAL_STORAGE_ENABLED=false
       - COPERNICUS_USERNAME=${COPERNICUS_USERNAME}
       - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD}
-      - GEE_PROJECT=principal-rhino-482514-f1
+      - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
+      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
+      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
+      - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
+      - ERA5_API_KEY=${ERA5_API_KEY}
+      - NOAA_API_KEY=${NOAA_API_KEY}
 
   web-app:
     build:

@@ -53,12 +53,27 @@ app.include_router(api_router, prefix="/api/v1")
 async def startup_event():
     """Initialize shared services once when the server starts."""
     from app.core import gee_manager
+    from app.core import startup_validation
+
+    # 1. Initialize Google Earth Engine (singleton, safe to fail)
     gee_manager.initialize()
 
-# Health check endpoint
+    # 2. Run environment + service validation (logs warnings, never raises)
+    startup_validation.run_all()
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 def health_check():
-    return {"status": "healthy", "service": "crop-risk-backend"}
+    from app.core import gee_manager
+    from app.core.config import settings
+    return {
+        "status": "healthy",
+        "service": "crop-risk-backend",
+        "gee": gee_manager.get_status(),
+        "planetary_computer_stac": settings.MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT,
+        "use_planetary_computer": settings.USE_PLANETARY_COMPUTER,
+    }
 
 # Temporary debug endpoint — remove after fixing
 @app.get("/api/v1/debug/db")
