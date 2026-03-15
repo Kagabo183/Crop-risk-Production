@@ -175,4 +175,29 @@ export const analyzeAllFarmsRisk = () =>
 // ── Health ──
 export const getHealth = () => api.get('/health')
 
+// ── Geo Intelligence ──
+export const getGeoTimeline = (farmId, daysBack = 90) =>
+  api.get(`/geo/farms/${farmId}/timeline`, { params: { days_back: daysBack } })
+export const getGeoNdviTiles = (farmId, daysBack = 30) =>
+  api.get(`/geo/farms/${farmId}/ndvi-tiles`, { params: { days_back: daysBack } })
+export const getGeoZones = (farmId) =>
+  api.get(`/geo/farms/${farmId}/zones`)
+export const computeGeoZones = (farmId, nZones = 3, daysBack = 90) =>
+  api.post(`/geo/farms/${farmId}/zones/compute`, null, { params: { n_zones: nZones, days_back: daysBack } })
+export const getGeoHotspots = (farmId) =>
+  api.get(`/geo/farms/${farmId}/hotspots`)
+export const getGeoScouting = (farmId) =>
+  api.get(`/geo/farms/${farmId}/scouting`)
+export const createScoutingObservation = (farmId, data) =>
+  api.post(`/geo/farms/${farmId}/scouting`, data)
+export const deleteScoutingObservation = (obsId) =>
+  api.delete(`/geo/scouting/${obsId}`)
+export const uploadScoutingPhoto = (obsId, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post(`/geo/scouting/${obsId}/photo`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+}
+export const getGeoCropClassification = (farmId) =>
+  api.get(`/geo/farms/${farmId}/crop-classification`)
+
 export default api

@@ -9,6 +9,7 @@ import {
   Users,
   UserCircle,
   LogOut,
+  Satellite,
 } from 'lucide-react'
 
 const ROLE_BADGE = {
@@ -35,6 +36,8 @@ export default function Sidebar({ open, onClose }) {
           ? [{ to: '/disease-classifier', icon: Bug, text: 'Disease Classifier' }] : []),
         ...(hasRole('admin', 'agronomist')
           ? [{ to: '/predictions', icon: ShieldAlert, text: 'Predictions' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/satellite-dashboard', icon: Satellite, text: 'Satellite Map' }] : []),
         { to: '/alerts', icon: AlertTriangle, text: 'Alerts' },
       ]
     },

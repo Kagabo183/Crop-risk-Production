@@ -20,6 +20,7 @@ celery_app.conf.include = [
     'app.tasks.ml_tasks',
     'app.tasks.process_tasks',
     'app.tasks.auto_crop_risk_tasks',
+    'app.tasks.geo_intelligence_tasks',
 ]
 
 # Run periodic scanner every 10 minutes to auto-enqueue processing of new TIFFs
@@ -97,6 +98,13 @@ beat_schedule = {
     'auto-crop-risk-daily': {
         'task': 'auto_crop_risk.analyze_all_farms',
         'schedule': crontab(minute=30, hour=6),  # Daily at 06:30 UTC (after disease predictions)
+        'args': (),
+    },
+
+    # ============ GEO INTELLIGENCE ============
+    'geo-productivity-zones-weekly': {
+        'task': 'geo_intelligence.compute_all_farms_zones',
+        'schedule': crontab(minute=0, hour=3, day_of_week='monday'),  # Weekly Monday 03:00 UTC
         'args': (),
     },
 }

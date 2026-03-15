@@ -16,6 +16,7 @@ import UserManagement from './pages/UserManagement'
 import Profile from './pages/Profile'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import SatelliteDashboard from './pages/SatelliteDashboard'
 import { getHealth } from './api'
 
 const PAGE_TITLES = {
@@ -30,6 +31,7 @@ const PAGE_TITLES = {
   '/satellite': 'Satellite Index Analysis',
   '/disease-forecasts': 'Outbreak Forecasts',
   '/ml-models': 'ML Model Engine',
+  '/satellite-dashboard': 'Satellite Intelligence Map',
 }
 
 function AppRoutes() {
@@ -106,6 +108,11 @@ function AppRoutes() {
         <Route path="/ml-models" element={
           <ProtectedRoute roles={['admin', 'agronomist']}>
             <MLModels />
+          </ProtectedRoute>
+        } />
+        <Route path="/satellite-dashboard" element={
+          <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+            <SatelliteDashboard />
           </ProtectedRoute>
         } />
 
