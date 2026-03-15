@@ -90,6 +90,8 @@ export const triggerSatelliteDownload = (farmId, daysBack = 30) =>
   api.post('/stress-monitoring/trigger-download', { farm_id: farmId, days_back: daysBack })
 export const getTaskStatus = (taskId) =>
   api.get(`/stress-monitoring/task-status/${taskId}`)
+export const autoFetchSatellite = (farmId) =>
+  api.post(`/farms/${farmId}/auto-fetch-satellite`)
 
 // ── Farm Satellite ──
 export const getFarmSatellite = () => api.get('/farm-satellite/')

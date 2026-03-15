@@ -465,6 +465,62 @@ def save_farm_boundary(
         )
 
 
+@router.post("/{farm_id}/auto-fetch-satellite")
+def auto_fetch_satellite(
+    farm_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Trigger on-demand satellite data fetch and risk analysis for a single farm.
+
+    Enqueues Celery tasks for satellite imagery download, vegetation index
+    computation, and composite crop-risk analysis.
+
+    Returns 202 with task_id for progress polling via /stress-monitoring/task-status/{task_id}.
+    """
+    # Get farm
+    db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
+    if not db_farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+
+    # Check permissions
+    if current_user.role == "farmer" and db_farm.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your farm")
+
+    # Must have coordinates
+    if not db_farm.latitude or not db_farm.longitude:
+        raise HTTPException(
+            status_code=400,
+            detail="Farm must have coordinates (latitude/longitude) for satellite fetch"
+        )
+
+    # Enqueue satellite processing task
+    try:
+        task = process_single_farm.delay(db_farm.id, 30)
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Task queue unavailable: {str(e)}"
+        )
+
+    # Also trigger crop risk analysis (fire-and-forget)
+    try:
+        analyze_single_farm_risk.delay(db_farm.id)
+    except Exception:
+        pass  # Non-critical; satellite fetch is the primary task
+
+    from starlette.responses import JSONResponse
+    return JSONResponse(
+        status_code=202,
+        content={
+            "farm_id": farm_id,
+            "task_id": task.id,
+            "message": "Satellite fetch queued",
+        },
+    )
+
+
 @router.get("/detect-location")
 def detect_location(
     latitude: float, 

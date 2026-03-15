@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { formatDate } from '../utils/formatDate'
 import { calculateHealthScore } from '../utils/healthScore'
 import { MapPin, Leaf, Droplets, Plus, Edit3, Trash2, Satellite } from 'lucide-react'
-import { getFarms, getFarmSatellite, deleteFarm, triggerSatelliteDownload, getTaskStatus } from '../api'
+import { getFarms, getFarmSatellite, deleteFarm, triggerSatelliteDownload, getTaskStatus, autoFetchSatellite } from '../api'
 import FarmRegistrationWizard from '../components/FarmRegistrationWizard'
 import { useAuth } from '../context/AuthContext'
 import { usePlatform } from '../context/PlatformContext'
@@ -84,7 +84,7 @@ export default function Farms() {
   const handleFetchSatellite = async (farmId) => {
     setSatProgress(prev => ({ ...prev, [farmId]: { percent: 5, stage: 'Starting...' } }))
     try {
-      const res = await triggerSatelliteDownload(farmId, 30)
+      const res = await autoFetchSatellite(farmId)
       const taskId = res.data.task_id
       pollTaskProgress(farmId, taskId)
     } catch (err) {
@@ -178,7 +178,6 @@ export default function Farms() {
           }}
         />
       )}
-      }
 
       {/* Farm List */}
       {isWeb ? (
@@ -229,6 +228,17 @@ export default function Farms() {
                         <td>{sat?.ndvi_date ? formatDate(sat.ndvi_date) : 'Never'}</td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            {farm.latitude && farm.longitude && (
+                              satProgress[farm.id] ? (
+                                <span style={{ fontSize: 11, color: 'var(--primary)' }}>
+                                  <Satellite size={13} /> {satProgress[farm.id].percent}%
+                                </span>
+                              ) : (
+                                <button className="btn btn-secondary btn-sm" onClick={() => handleFetchSatellite(farm.id)} title="Fetch satellite data">
+                                  <Satellite size={14} /> Fetch
+                                </button>
+                              )
+                            )}
                             <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(farm)}>
                               <Edit3 size={14} /> Edit
                             </button>

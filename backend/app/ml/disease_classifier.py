@@ -568,13 +568,7 @@ class DiseaseClassifier:
                 logger.warning(f"⚠️ Class mapping file not found at {class_map}, using hardcoded CLASS_INFO")
 
             if not path.exists():
-                logger.warning(f"Model file not found at {path}, creating new model")
-                self.model = self._create_model()
-                if self.model:
-                    self.model.to(self.device)
-                    self.model.eval()
-                    self.model_loaded = True
-                    return True
+                logger.warning(f"Model file not found at {path}, model will not be loaded")
                 return False
 
             self.model = self._create_model()

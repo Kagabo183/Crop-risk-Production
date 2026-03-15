@@ -9,9 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.disease import Disease, DiseasePrediction, DiseaseModelConfig, WeatherForecast
 from app.models.farm import Farm
 from app.services.weather_service import WeatherDataIntegrator
-from app.core.config import Settings
-
-settings = Settings()
+from app.core.config import settings
 
 
 class DiseaseModelEngine:

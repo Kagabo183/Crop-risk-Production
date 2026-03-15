@@ -8,12 +8,15 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from sqlalchemy.orm import Session
 from app.models.data import WeatherRecord
-from app.core.config import Settings
-import openmeteo_requests
-import requests_cache
-from retry_requests import retry
+from app.core.config import settings
 
-settings = Settings()
+try:
+    import openmeteo_requests
+    import requests_cache
+    from retry_requests import retry
+    _HAS_OPENMETEO = True
+except ImportError:
+    _HAS_OPENMETEO = False
 
 
 class WeatherDataIntegrator:
@@ -26,9 +29,11 @@ class WeatherDataIntegrator:
         self.local_station_url = settings.LOCAL_STATION_URL
         
         # Setup Open-Meteo with caching and retry
-        cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-        retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-        self.openmeteo = openmeteo_requests.Client(session=retry_session)
+        self.openmeteo = None
+        if _HAS_OPENMETEO:
+            cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+            retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+            self.openmeteo = openmeteo_requests.Client(session=retry_session)
         
     def fetch_era5_data(self, lat: float, lon: float, start_date: datetime, end_date: datetime) -> Dict:
         """

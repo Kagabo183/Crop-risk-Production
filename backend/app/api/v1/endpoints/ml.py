@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.farm import Farm
+from app.models.data import SatelliteImage, WeatherRecord
 from app.core.auth import get_current_active_user, check_farm_access, require_any_authenticated, require_farmer_or_above
 from app.models.user import User as UserModel
 
@@ -47,6 +48,8 @@ class DiseaseClassifyResponse(BaseModel):
     gradcam_base64: Optional[str] = None
     model_type: Optional[str] = None  # "per_crop" or "general_80class"
     image_url: Optional[str] = None
+    error: Optional[str] = None
+    model_version: Optional[str] = None
 
 
 class RiskAssessmentRequest(BaseModel):
