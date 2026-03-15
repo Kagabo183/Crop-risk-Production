@@ -19,12 +19,13 @@ Colour scale (red → yellow → green):
 """
 import logging
 from datetime import datetime, timedelta, date
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.farm import Farm
 from app.models.data import VegetationHealth
+from app.models.geo_intelligence import NdviOverlay
 from app.core import gee_manager
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 # GEE colour palette (hex strings, no '#')
 NDVI_PALETTE = ["F44336", "FF5722", "FFC107", "CDDC39", "8BC34A", "4CAF50"]
 NDVI_VIS = {"min": 0.0, "max": 0.75, "palette": NDVI_PALETTE}
+
+# MSAVI visual palette (same red→green)
+MSAVI_PALETTE = NDVI_PALETTE
+MSAVI_VIS = {"min": 0.0, "max": 0.75, "palette": MSAVI_PALETTE}
 
 
 class NdviTileService:
@@ -120,13 +125,14 @@ class NdviTileService:
         map_id = ndvi_image.getMapId(NDVI_VIS)
         tile_url = map_id["tile_fetcher"].url_format
 
-        return {
+        result = {
             "tile_url": tile_url,
             "bounds": [bounds_sw, bounds_ne],
             "mean_ndvi": round(mean_ndvi, 4),
             "source": source,
             "date": end_str,
         }
+        return result
 
     # ── DB fallback path ─────────────────────────────────────────────────────────
 
@@ -208,3 +214,101 @@ class NdviTileService:
         if ndvi >= 0.1:
             return "#FF5722"
         return "#F44336"
+
+    # ── Tile caching ───────────────────────────────────────────────────────────
+
+    def cache_tile_result(
+        self,
+        farm: Farm,
+        result: Dict[str, Any],
+        db: Session,
+    ) -> None:
+        """
+        Persist a tile generation result to the ndvi_overlays table so that
+        the frontend can retrieve historical tile URLs for a time slider.
+        Only saves when a real tile_url was generated (not fallback).
+        """
+        if not result.get("tile_url"):
+            return   # Don't cache empty fallback results
+
+        try:
+            obs_date = date.fromisoformat(result.get("date") or date.today().isoformat())
+            bounds = result.get("bounds")
+
+            # Avoid duplicates: one record per farm per date
+            existing = (
+                db.query(NdviOverlay)
+                .filter(
+                    NdviOverlay.farm_id == farm.id,
+                    NdviOverlay.date == obs_date,
+                )
+                .first()
+            )
+
+            if existing:
+                existing.tile_url_template = result["tile_url"]
+                existing.mean_ndvi = result.get("mean_ndvi")
+                existing.source = result.get("source", "gee")
+                existing.bounds = bounds
+                existing.generated_at = datetime.utcnow()
+            else:
+                db.add(NdviOverlay(
+                    farm_id=farm.id,
+                    date=obs_date,
+                    tile_url_template=result["tile_url"],
+                    bounds=bounds,
+                    mean_ndvi=result.get("mean_ndvi"),
+                    source=result.get("source", "gee"),
+                    generated_at=datetime.utcnow(),
+                ))
+
+            db.commit()
+        except Exception as exc:
+            logger.warning("Failed to cache tile for farm %s: %s", farm.id, exc)
+            db.rollback()
+
+    def get_tile_history(
+        self,
+        farm_id: int,
+        db: Session,
+        limit: int = 12,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve the *limit* most-recent cached tile records for *farm_id*.
+        Returns a list of dicts suitable for a frontend time slider.
+        """
+        rows = (
+            db.query(NdviOverlay)
+            .filter(
+                NdviOverlay.farm_id == farm_id,
+                NdviOverlay.tile_url_template.isnot(None),
+            )
+            .order_by(NdviOverlay.date.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "date": r.date.isoformat() if r.date else None,
+                "tile_url": r.tile_url_template,
+                "bounds": r.bounds,
+                "mean_ndvi": r.mean_ndvi,
+                "source": r.source,
+            }
+            for r in rows
+        ]
+
+    def get_ndvi_tile_info_cached(
+        self,
+        farm: Farm,
+        db: Session,
+        days_back: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Wrapper around get_ndvi_tile_info that also caches the result
+        into NdviOverlay for time-series history.
+        """
+        result = self.get_ndvi_tile_info(farm, db, days_back)
+        if result.get("tile_url"):
+            self.cache_tile_result(farm, result, db)
+        return result

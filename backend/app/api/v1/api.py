@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     farms, stress_monitoring, farm_satellite, ml, admin,
     early_warning, pipeline, fetch_real_data, auth, parcels, advisory,
-    auto_crop_risk, geo_intelligence,
+    auto_crop_risk, geo_intelligence, precision_ag,
 )
 
 api_router = APIRouter()
@@ -19,4 +19,5 @@ api_router.include_router(pipeline.router, prefix="/pipeline", tags=["pipeline"]
 api_router.include_router(fetch_real_data.router, tags=["real-data"])
 api_router.include_router(advisory.router, prefix="/advisory", tags=["advisory"])
 api_router.include_router(auto_crop_risk.router, prefix="/farm", tags=["auto-crop-risk"])
-api_router.include_router(geo_intelligence.router, prefix="/geo", tags=["geo-intelligence"])
+api_router.include_router(geo_intelligence.router,  prefix="/geo",          tags=["geo-intelligence"])
+api_router.include_router(precision_ag.router,       prefix="/precision-ag",  tags=["precision-agriculture"])

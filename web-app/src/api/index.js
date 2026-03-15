@@ -199,5 +199,47 @@ export const uploadScoutingPhoto = (obsId, file) => {
 }
 export const getGeoCropClassification = (farmId) =>
   api.get(`/geo/farms/${farmId}/crop-classification`)
+export const getGeoPhenology       = (farmId, daysBack = 180) =>
+  api.get(`/geo/farms/${farmId}/phenology`, { params: { days_back: daysBack } })
+export const computeGeoPhenology   = (farmId, daysBack = 180) =>
+  api.post(`/geo/farms/${farmId}/phenology/compute`, null, { params: { days_back: daysBack } })
+export const getGeoNdviTileHistory = (farmId, limit = 12) =>
+  api.get(`/geo/farms/${farmId}/ndvi-tile-history`, { params: { limit } })
+export const getGeoFusionStatus    = (farmId, daysBack = 30) =>
+  api.get(`/geo/farms/${farmId}/fusion-status`, { params: { days_back: daysBack } })
+
+// ── Precision Agriculture ─────────────────────────────────────────────────────
+export const getSeasonsForFarm    = (farmId)           => api.get(`/precision-ag/farms/${farmId}/seasons`)
+export const createSeason         = (farmId, data)     => api.post(`/precision-ag/farms/${farmId}/seasons`, data)
+export const updateSeason         = (seasonId, data)   => api.put(`/precision-ag/seasons/${seasonId}`, data)
+export const deleteSeason         = (seasonId)         => api.delete(`/precision-ag/seasons/${seasonId}`)
+export const getCropRotationHistory = (farmId)         => api.get(`/precision-ag/farms/${farmId}/crop-rotation`)
+export const generateCropRotation = (seasonId)         => api.post(`/precision-ag/seasons/${seasonId}/crop-rotation`)
+export const getVraMapsForFarm    = (farmId)           => api.get(`/precision-ag/farms/${farmId}/vra`)
+export const computeVraMap        = (farmId, data)     => api.post(`/precision-ag/farms/${farmId}/vra/generate`, data)
+export const exportVraGeoJson     = (vraId)            => api.get(`/precision-ag/vra/${vraId}/export/geojson`, { responseType: 'blob' })
+export const exportVraIsoxml      = (vraId)            => api.get(`/precision-ag/vra/${vraId}/export/isoxml`, { responseType: 'blob' })
+export const getSoilSamplesForFarm = (farmId)          => api.get(`/precision-ag/farms/${farmId}/soil-samples`)
+export const generateGridSampling = (farmId, gridSizeM, notes) =>
+  api.post(`/precision-ag/farms/${farmId}/soil-samples/grid`, { grid_size_m: gridSizeM, notes })
+export const generateZoneSampling = (farmId, notes)    => api.post(`/precision-ag/farms/${farmId}/soil-samples/zone`, { notes })
+export const uploadNutrientResults = (sampleId, results) =>
+  api.post(`/precision-ag/soil-samples/${sampleId}/results`, { results })
+export const getNutrientMap       = (sampleId)         => api.get(`/precision-ag/soil-samples/${sampleId}/nutrient-map`)
+export const getYieldMapsForFarm  = (farmId)           => api.get(`/precision-ag/farms/${farmId}/yield-maps`)
+export const uploadYieldMap       = (farmId, file, { seasonId, cropType, harvestDate } = {}) => {
+  const form = new FormData()
+  form.append('file', file)
+  const params = {}
+  if (seasonId)    params.season_id    = seasonId
+  if (cropType)    params.crop_type    = cropType
+  if (harvestDate) params.harvest_date = harvestDate
+  return api.post(`/precision-ag/farms/${farmId}/yield-maps`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    params,
+  })
+}
+export const getYieldMap          = (yieldId)          => api.get(`/precision-ag/yield-maps/${yieldId}`)
+export const deleteYieldMap       = (yieldId)          => api.delete(`/precision-ag/yield-maps/${yieldId}`)
 
 export default api

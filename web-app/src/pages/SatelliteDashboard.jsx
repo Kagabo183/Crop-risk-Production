@@ -25,6 +25,7 @@ import {
   getFarms, getGeoNdviTiles, getGeoZones, computeGeoZones,
   getGeoHotspots, getGeoScouting, createScoutingObservation,
   deleteScoutingObservation, getGeoCropClassification,
+  getGeoPhenology, getGeoNdviTileHistory, getGeoFusionStatus,
 } from '../api'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -58,6 +59,10 @@ export default function SatelliteDashboard() {
   const [hotspots, setHotspots]         = useState([])
   const [scoutingObs, setScoutingObs]   = useState([])
   const [cropClass, setCropClass]       = useState(null)
+  const [phenology, setPhenology]           = useState(null)
+  const [tileHistory, setTileHistory]       = useState([])
+  const [tileHistoryIdx, setTileHistoryIdx] = useState(0)
+  const [fusionStatus, setFusionStatus]     = useState(null)
 
   // ── layer visibility toggles ──
   const [showNdvi,     setShowNdvi]     = useState(true)
@@ -135,6 +140,19 @@ export default function SatelliteDashboard() {
 
     try { map.fitBounds(layer.getBounds(), { padding: [40, 40] }) }
     catch (_) {}
+  }, [])
+
+  // ── apply historical NDVI tile (time slider) ─────────────────────────────────
+  const applyHistoricalTile = useCallback((tile) => {
+    const L = window.L
+    const map = mapInstance.current
+    if (!map || !L || !tile?.tile_url) return
+    if (ndviLayer.current) { map.removeLayer(ndviLayer.current); ndviLayer.current = null }
+    ndviLayer.current = L.tileLayer(tile.tile_url, {
+      opacity: 0.75,
+      attribution: '© Google Earth Engine',
+      maxZoom: 17,
+    }).addTo(map)
   }, [])
 
   // ── draw NDVI overlay ───────────────────────────────────────────────────────
@@ -294,6 +312,7 @@ export default function SatelliteDashboard() {
     drawFarmBoundary(farm)
     setLoading(true)
     setNdviInfo(null); setZones([]); setHotspots([]); setScoutingObs([]); setCropClass(null)
+    setPhenology(null); setTileHistory([]); setTileHistoryIdx(0); setFusionStatus(null)
 
     Promise.allSettled([
       getGeoNdviTiles(selectedId),
@@ -301,18 +320,28 @@ export default function SatelliteDashboard() {
       getGeoHotspots(selectedId),
       getGeoScouting(selectedId),
       getGeoCropClassification(selectedId),
-    ]).then(([ndvi, z, h, s, cc]) => {
-      const ndviData = ndvi.status === 'fulfilled' ? ndvi.value.data : null
-      const zonesData = z.status === 'fulfilled' ? (z.value.data.zones || []) : []
-      const hotData   = h.status === 'fulfilled' ? (h.value.data.hotspots || []) : []
-      const scData    = s.status === 'fulfilled' ? (s.value.data.observations || []) : []
-      const ccData    = cc.status === 'fulfilled' ? cc.value.data : null
+      getGeoPhenology(selectedId),
+      getGeoNdviTileHistory(selectedId, 12),
+      getGeoFusionStatus(selectedId),
+    ]).then(([ndvi, z, h, s, cc, pheno, hist, fusion]) => {
+      const ndviData   = ndvi.status   === 'fulfilled' ? ndvi.value.data   : null
+      const zonesData  = z.status      === 'fulfilled' ? (z.value.data.zones || [])        : []
+      const hotData    = h.status      === 'fulfilled' ? (h.value.data.hotspots || [])     : []
+      const scData     = s.status      === 'fulfilled' ? (s.value.data.observations || []) : []
+      const ccData     = cc.status     === 'fulfilled' ? cc.value.data     : null
+      const phenoData  = pheno.status  === 'fulfilled' ? pheno.value.data  : null
+      const histData   = hist.status   === 'fulfilled' ? (hist.value.data.tiles || [])     : []
+      const fusionData = fusion.status === 'fulfilled' ? fusion.value.data : null
 
       setNdviInfo(ndviData)
       setZones(zonesData)
       setHotspots(hotData)
       setScoutingObs(scData)
       setCropClass(ccData)
+      setPhenology(phenoData)
+      setTileHistory(histData)
+      setTileHistoryIdx(0)
+      setFusionStatus(fusionData)
 
       drawNdvi(ndviData, farm)
       drawZones(zonesData)
@@ -320,6 +349,18 @@ export default function SatelliteDashboard() {
       drawScouting(scData)
     }).finally(() => setLoading(false))
   }, [selectedId, farms, drawFarmBoundary, drawNdvi, drawZones, drawHotspots, drawScouting])
+
+  // ── time slider: swap NDVI tile when index changes ───────────────────────────
+  useEffect(() => {
+    if (!tileHistory.length) return
+    const tile = tileHistory[tileHistoryIdx]
+    if (tile?.tile_url) {
+      applyHistoricalTile(tile)
+    } else if (tileHistoryIdx === 0) {
+      // restore live tile when snapping back to latest
+      drawNdvi(ndviInfo, selectedFarm)
+    }
+  }, [tileHistoryIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── re-draw when toggles change ─────────────────────────────────────────────
   useEffect(() => { drawNdvi(ndviInfo, selectedFarm) }, [showNdvi, ndviInfo, selectedFarm, drawNdvi])
@@ -446,6 +487,11 @@ export default function SatelliteDashboard() {
           </div>
         )}
 
+        {/* Phenology / growth stage card */}
+        {phenology && !loading && (
+          <PhenologyCard phenology={phenology} />
+        )}
+
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
             <span className="spinner" style={{ width: 14, height: 14 }} />
@@ -465,6 +511,11 @@ export default function SatelliteDashboard() {
             <LayerToggle active={showScouting} onChange={setShowScouting} color="#2196F3" label="Field Scouting" />
           </div>
         </div>
+
+        {/* Satellite fusion coverage status */}
+        {fusionStatus && !loading && (
+          <FusionStatusRow status={fusionStatus} />
+        )}
 
         {/* Productivity zones legend + recompute */}
         {zones.length > 0 && showZones && (
@@ -629,6 +680,35 @@ export default function SatelliteDashboard() {
           )}
         </div>
 
+        {/* NDVI time slider (satellite history) */}
+        {tileHistory.length > 1 && (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>
+              Satellite History
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500, marginBottom: 4 }}>
+              {tileHistory[tileHistoryIdx]?.date
+                ? new Date(tileHistory[tileHistoryIdx].date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                : '—'}
+              {tileHistoryIdx === 0 && <span style={{ color: 'var(--primary)', marginLeft: 4, fontSize: 10 }}>(latest)</span>}
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={tileHistory.length - 1}
+              value={tileHistoryIdx}
+              onChange={e => setTileHistoryIdx(Number(e.target.value))}
+              style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer' }}
+              title="Drag to view NDVI for a past date"
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
+              <span>{tileHistory[tileHistory.length - 1]?.date?.slice(0, 10)}</span>
+              <span>{tileHistory.length} dates</span>
+              <span>{tileHistory[0]?.date?.slice(0, 10)}</span>
+            </div>
+          </div>
+        )}
+
       </aside>
 
       {/* ── MAP ──────────────────────────────────────────────────────────────── */}
@@ -707,3 +787,90 @@ const FIELD_STYLE = {
 }
 
 const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+
+// ─── PhenologyCard ───────────────────────────────────────────────────────────
+
+const STAGE_META = {
+  emergence:    { label: 'Emergence',    color: '#81C784', icon: '🌱' },
+  vegetative:   { label: 'Vegetative',   color: '#4CAF50', icon: '🌿' },
+  flowering:    { label: 'Flowering',    color: '#FFC107', icon: '🌸' },
+  grain_filling:{ label: 'Grain Filling',color: '#FF9800', icon: '🌾' },
+  maturity:     { label: 'Maturity',     color: '#795548', icon: '✅' },
+}
+
+function PhenologyCard({ phenology }) {
+  const stage   = phenology?.detected_stage || 'vegetative'
+  const meta    = STAGE_META[stage] || { label: capitalize(stage), color: '#607D8B', icon: '📊' }
+  const conf    = Math.round((phenology?.confidence || 0) * 100)
+  const method  = phenology?.detection_method || 'spectral_curve'
+  return (
+    <div style={{
+      background: `${meta.color}12`, border: `1px solid ${meta.color}50`,
+      borderRadius: 8, padding: '10px 12px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 18 }}>{meta.icon}</span>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Growth Stage</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: meta.color }}>{meta.label}</div>
+        </div>
+      </div>
+      {/* confidence bar */}
+      <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, marginBottom: 6 }}>
+        <div style={{ height: '100%', width: `${conf}%`, background: meta.color, borderRadius: 2, transition: 'width .4s' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 11, color: 'var(--text-secondary)' }}>
+        <span>Confidence: <b style={{ color: 'var(--text-primary)' }}>{conf}%</b></span>
+        <span>Method: <b style={{ color: 'var(--text-primary)' }}>{method.replace(/_/g, ' ')}</b></span>
+        {phenology?.ndvi_at_detection != null && (
+          <span>NDVI: <b style={{ color: 'var(--text-primary)' }}>{Number(phenology.ndvi_at_detection).toFixed(3)}</b></span>
+        )}
+        {phenology?.gdd_accumulated != null && (
+          <span>GDD: <b style={{ color: 'var(--text-primary)' }}>{Math.round(phenology.gdd_accumulated)}°C·d</b></span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── FusionStatusRow ─────────────────────────────────────────────────────────
+
+function FusionStatusRow({ status }) {
+  const total   = status?.total_observations || 0
+  const s2      = status?.by_source?.sentinel2 || 0
+  const sar     = status?.sar_filled  || 0
+  const ls      = status?.landsat_filled || 0
+  const cov     = Math.round((status?.coverage_pct || 0) * 100)
+  if (!total) return null
+  return (
+    <div style={{
+      background: 'var(--bg-body)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '8px 12px',
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+        Satellite Fusion Coverage
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <FusionChip label="S2 optical" value={s2}  color="#2196F3" />
+        <FusionChip label="SAR fills"  value={sar} color="#FF9800" />
+        <FusionChip label="Landsat"    value={ls}  color="#9C27B0" />
+      </div>
+      <div style={{ marginTop: 6, height: 4, background: 'var(--border)', borderRadius: 2 }}>
+        <div style={{ height: '100%', width: `${cov}%`, background: 'var(--primary)', borderRadius: 2, transition: 'width .4s' }} />
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 3 }}>{cov}% coverage ({total} obs)</div>
+    </div>
+  )
+}
+
+function FusionChip({ label, value, color }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600,
+      background: `${color}18`, border: `1px solid ${color}40`, color,
+    }}>
+      {value} {label}
+    </span>
+  )
+}

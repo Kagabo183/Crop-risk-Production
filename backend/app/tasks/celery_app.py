@@ -21,6 +21,8 @@ celery_app.conf.include = [
     'app.tasks.process_tasks',
     'app.tasks.auto_crop_risk_tasks',
     'app.tasks.geo_intelligence_tasks',
+    'app.tasks.precision_ag_tasks',
+    'app.tasks.satellite_fusion_tasks',
 ]
 
 # Run periodic scanner every 10 minutes to auto-enqueue processing of new TIFFs
@@ -101,10 +103,38 @@ beat_schedule = {
         'args': (),
     },
 
+    # ============ SATELLITE FUSION (SAR + optical merge) ============
+    # Runs 30 min after optical fetch so fresh S2 records exist first
+    'satellite-fusion-every-3-days': {
+        'task': 'satellite_fusion.run_fusion_all_farms',
+        'schedule': crontab(minute=30, hour=2, day_of_week='*/3'),  # Every 3 days 02:30 UTC
+        'args': (),
+    },
+
+    # ============ PHENOLOGY (crop growth stage) ============
+    # Weekly — enough time-series data accumulates between runs
+    'phenology-detection-weekly': {
+        'task': 'phenology.detect_all_farms',
+        'schedule': crontab(minute=0, hour=2, day_of_week='monday'),  # Monday 02:00 UTC
+        'args': (),
+    },
+
     # ============ GEO INTELLIGENCE ============
     'geo-productivity-zones-weekly': {
         'task': 'geo_intelligence.compute_all_farms_zones',
         'schedule': crontab(minute=0, hour=3, day_of_week='monday'),  # Weekly Monday 03:00 UTC
+        'args': (),
+    },
+
+    # ============ PRECISION AGRICULTURE ============
+    'precision-ag-vra-weekly': {
+        'task': 'precision_ag.compute_vra_all_farms',
+        'schedule': crontab(minute=30, hour=3, day_of_week='monday'),  # Weekly Monday 03:30 UTC
+        'args': (),
+    },
+    'precision-ag-rotation-weekly': {
+        'task': 'precision_ag.generate_rotation_analysis_all',
+        'schedule': crontab(minute=0, hour=4, day_of_week='monday'),  # Weekly Monday 04:00 UTC
         'args': (),
     },
 }

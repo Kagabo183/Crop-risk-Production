@@ -17,6 +17,9 @@ import Profile from './pages/Profile'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import SatelliteDashboard from './pages/SatelliteDashboard'
+import SeasonManager from './pages/SeasonManager'
+import VraDashboard from './pages/VraDashboard'
+import YieldAnalysis from './pages/YieldAnalysis'
 import { getHealth } from './api'
 
 const PAGE_TITLES = {
@@ -32,6 +35,9 @@ const PAGE_TITLES = {
   '/disease-forecasts': 'Outbreak Forecasts',
   '/ml-models': 'ML Model Engine',
   '/satellite-dashboard': 'Satellite Intelligence Map',
+  '/seasons': 'Season & Crop Rotation Management',
+  '/vra': 'VRA Prescription Maps',
+  '/yield-analysis': 'Yield Analysis',
 }
 
 function AppRoutes() {
@@ -113,6 +119,21 @@ function AppRoutes() {
         <Route path="/satellite-dashboard" element={
           <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
             <SatelliteDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/seasons" element={
+          <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+            <SeasonManager />
+          </ProtectedRoute>
+        } />
+        <Route path="/vra" element={
+          <ProtectedRoute roles={['admin', 'agronomist']}>
+            <VraDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/yield-analysis" element={
+          <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+            <YieldAnalysis />
           </ProtectedRoute>
         } />
 

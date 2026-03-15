@@ -10,6 +10,9 @@ import {
   UserCircle,
   LogOut,
   Satellite,
+  Calendar,
+  Layers,
+  BarChart2,
 } from 'lucide-react'
 
 const ROLE_BADGE = {
@@ -39,6 +42,16 @@ export default function Sidebar({ open, onClose }) {
         ...(hasRole('admin', 'agronomist', 'farmer')
           ? [{ to: '/satellite-dashboard', icon: Satellite, text: 'Satellite Map' }] : []),
         { to: '/alerts', icon: AlertTriangle, text: 'Alerts' },
+      ]
+    },
+    {
+      label: 'Precision Ag', items: [
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/seasons', icon: Calendar, text: 'Seasons' }] : []),
+        ...(hasRole('admin', 'agronomist')
+          ? [{ to: '/vra', icon: Layers, text: 'VRA Maps' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/yield-analysis', icon: BarChart2, text: 'Yield Analysis' }] : []),
       ]
     },
     ...(hasRole('admin') ? [{

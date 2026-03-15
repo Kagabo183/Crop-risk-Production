@@ -35,6 +35,7 @@ from app.db.database import get_db
 from app.models.data import SatelliteImage, VegetationHealth
 from app.models.farm import Farm as FarmModel
 from app.models.geo_intelligence import ProductivityZone, ScoutingObservation
+from app.models.phenology import PhenologyRecord
 from app.models.user import User as UserModel
 
 logger = logging.getLogger(__name__)
@@ -581,3 +582,122 @@ def _classify_crop_gee(farm: FarmModel) -> dict:
         },
         "all_scores": {k: round(v, 3) for k, v in crop_scores.items()},
     }
+
+
+# ── 11. Phenology / crop growth stage – GET current ──────────────────────────
+
+@router.get("/farms/{farm_id}/phenology")
+def get_phenology(
+    farm_id: int,
+    days_back: int = Query(180, ge=30, le=365),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Return the latest phenology record for a farm.
+    If the record is stale (>3 days old) or absent, it is recomputed live.
+    """
+    farm = _get_farm(farm_id, db, current_user)
+
+    existing = (
+        db.query(PhenologyRecord)
+        .filter(PhenologyRecord.farm_id == farm_id)
+        .order_by(PhenologyRecord.computed_at.desc())
+        .first()
+    )
+    if existing and (datetime.utcnow() - existing.computed_at).days < 3:
+        return {
+            "farm_id": farm_id,
+            "crop_type": existing.crop_type,
+            "detected_stage": existing.detected_stage,
+            "confidence": existing.confidence,
+            "stage_start_date": existing.stage_start_date,
+            "ndvi_at_detection": existing.ndvi_at_detection,
+            "ndvi_peak": existing.ndvi_peak,
+            "gdd_accumulated": existing.gdd_accumulated,
+            "detection_method": existing.detection_method,
+            "ndvi_series_used": existing.ndvi_series_used,
+            "computed_at": existing.computed_at,
+            "source": "cached",
+        }
+
+    from app.services.phenology_service import PhenologyService
+    svc = PhenologyService()
+    try:
+        result = svc.detect_growth_stage(farm, db, window_days=days_back)
+        svc.save_phenology_record(result, db)
+        result["source"] = "computed"
+        return result
+    except Exception as e:
+        logger.warning("Phenology detection failed for farm %s: %s", farm_id, e)
+        raise HTTPException(status_code=500, detail=f"Phenology detection failed: {e}")
+
+
+# ── 12. Phenology – force recompute (POST) ───────────────────────────────────
+
+@router.post("/farms/{farm_id}/phenology/compute")
+def compute_phenology(
+    farm_id: int,
+    days_back: int = Query(180, ge=30, le=365),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """Force recompute the crop growth stage for a farm and persist result."""
+    farm = _get_farm(farm_id, db, current_user)
+
+    from app.services.phenology_service import PhenologyService
+    svc = PhenologyService()
+    try:
+        result = svc.detect_growth_stage(farm, db, window_days=days_back)
+        svc.save_phenology_record(result, db)
+        result["source"] = "computed_fresh"
+        return result
+    except Exception as e:
+        logger.warning("Phenology compute failed for farm %s: %s", farm_id, e)
+        raise HTTPException(status_code=500, detail=f"Phenology compute failed: {e}")
+
+
+# ── 13. NDVI tile history (time slider) ──────────────────────────────────────
+
+@router.get("/farms/{farm_id}/ndvi-tile-history")
+def get_ndvi_tile_history(
+    farm_id: int,
+    limit: int = Query(12, ge=1, le=52),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Return a list of cached NDVI tile URLs ordered by date descending.
+    Powers the time-slider in SatelliteDashboard.
+    """
+    _get_farm(farm_id, db, current_user)  # ownership check
+
+    from app.services.ndvi_tile_service import NdviTileService
+    svc = NdviTileService()
+    tiles = svc.get_tile_history(farm_id, db, limit=limit)
+    return {"farm_id": farm_id, "count": len(tiles), "tiles": tiles}
+
+
+# ── 14. Satellite fusion status ───────────────────────────────────────────────
+
+@router.get("/farms/{farm_id}/fusion-status")
+def get_fusion_status(
+    farm_id: int,
+    days_back: int = Query(30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Return multi-satellite data coverage statistics for a farm.
+    Shows how many observations came from Sentinel-2, SAR fills, and Landsat.
+    """
+    farm = _get_farm(farm_id, db, current_user)
+
+    from app.services.satellite_fusion_service import SatelliteFusionService
+    svc = SatelliteFusionService()
+    try:
+        status = svc.get_fusion_status(farm, db, days_back=days_back)
+        return status
+    except Exception as e:
+        logger.warning("Fusion status failed for farm %s: %s", farm_id, e)
+        raise HTTPException(status_code=500, detail=f"Fusion status unavailable: {e}")
