@@ -157,6 +157,19 @@ export const getDailyAdvisory = (farmId, includeRisk = true) =>
   api.get(`/advisory/daily/${farmId}`, { params: { include_risk: includeRisk } })
 export const getAdvisorySummary = () => api.get('/advisory/summary')
 
+// ── Auto Crop Risk ──
+export const analyzeFarmRisk = (farmId, { daysBack = 15, maxCloudCover = 20, forceRefresh = false } = {}) =>
+  api.post('/farm/analyze-risk', {
+    farm_id: farmId,
+    days_back: daysBack,
+    max_cloud_cover: maxCloudCover,
+    force_refresh: forceRefresh,
+  }, { timeout: 120000 })
+export const getFarmRisk = (farmId, forceRefresh = false) =>
+  api.get(`/farm/analyze-risk/${farmId}`, { params: { force_refresh: forceRefresh }, timeout: 120000 })
+export const analyzeAllFarmsRisk = () =>
+  api.post('/farm/analyze-risk/all', null, { timeout: 300000 })
+
 // ── Health ──
 export const getHealth = () => api.get('/health')
 

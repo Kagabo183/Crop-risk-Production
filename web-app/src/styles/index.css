@@ -815,17 +815,44 @@ input:focus, select:focus, textarea:focus {
 /* Map */
 .farm-map-container { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); }
 
-/* Responsive: hide sidebar on narrow */
+/* ════════════════════════════════════════
+   RESPONSIVE — TABLET  ≤ 1023 px
+   ════════════════════════════════════════ */
 @media (max-width: 1023px) {
+  /* Sidebar slides off-screen; toggled by .open class */
   .sidebar {
     transform: translateX(-100%);
+    position: fixed;
+    z-index: 200;
+    height: 100dvh;
+    box-shadow: var(--shadow-lg);
   }
-  .sidebar.open {
-    transform: none;
+  .sidebar.open { transform: none; }
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 199;
   }
-  .web-main {
-    margin-left: 0 !important;
-  }
+
+  .web-main { margin-left: 0 !important; }
+
+  /* Header adapts */
+  .header { padding: 0 20px; }
+  .header-status { display: none; }
+
+  /* Stats: 2 columns on tablet */
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+
+  /* Grids collapse */
+  .grid-3 { grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Welcome banner – stack content */
+  .welcome-banner { flex-direction: column; gap: 16px; align-items: flex-start; padding: 22px 24px; }
+
+  /* Health pulse cards stack */
+  .health-pulse-container { flex-direction: column; }
 }
 
 /* Premium farm list - empty compact */
@@ -1314,26 +1341,73 @@ input:focus, select:focus, textarea:focus {
 /* ════════════════════════════════════════
    RESPONSIVE ENHANCEMENTS
    ════════════════════════════════════════ */
+/* ════════════════════════════════════════
+   RESPONSIVE — MOBILE  ≤ 640 px
+   ════════════════════════════════════════ */
 @media (max-width: 640px) {
-  .profile-info-grid {
-    grid-template-columns: 1fr;
-  }
-  .profile-edit-row {
-    grid-template-columns: 1fr;
-  }
-  .profile-card-header {
-    padding: 20px;
-  }
-  .profile-card-body {
-    padding: 18px 20px;
-  }
-  .admin-app-grid {
-    grid-template-columns: 1fr;
-  }
-  .admin-tabs {
-    flex-direction: column;
-  }
-  .header-user-role {
-    display: none;
-  }
+  /* Layout */
+  .page-content { padding: 16px 14px; }
+  .header { padding: 0 14px; }
+  .header-title { font-size: 15px; }
+
+  /* Stats: single column */
+  .stats-grid { grid-template-columns: 1fr; gap: 12px; margin-bottom: 16px; }
+  .stat-card { padding: 14px; gap: 12px; }
+  .stat-value { font-size: 22px; }
+
+  /* All grids become single column */
+  .grid-2, .grid-3 { grid-template-columns: 1fr; gap: 14px; }
+
+  /* Cards */
+  .card-header { padding: 12px 16px; }
+  .card-body   { padding: 16px; }
+
+  /* Buttons — ensure 44 px minimum touch target */
+  .btn { min-height: 44px; padding: 10px 16px; font-size: 14px; }
+  .btn-sm { min-height: 36px; padding: 8px 14px; font-size: 13px; }
+  .btn-icon { width: 44px; height: 44px; }
+
+  /* Tables — full horizontal scroll */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { min-width: 480px; }
+  th, td { padding: 10px 12px; }
+
+  /* Forms */
+  input, select, textarea { font-size: 16px; /* prevent iOS zoom */ }
+  .form-group { margin-bottom: 14px; }
+
+  /* Welcome banner */
+  .welcome-banner { padding: 18px 16px; gap: 14px; }
+  .welcome-title { font-size: 18px; }
+
+  /* Quick actions */
+  .quick-actions-row { flex-direction: column; }
+
+  /* Auth page */
+  .auth-card { padding: 1.75rem 1.5rem; border-radius: 1.25rem; }
+
+  /* Profile page */
+  .profile-info-grid { grid-template-columns: 1fr; }
+  .profile-edit-row  { grid-template-columns: 1fr; }
+  .profile-card-header { padding: 20px; }
+  .profile-card-body   { padding: 18px 20px; }
+
+  /* Admin */
+  .admin-app-grid { grid-template-columns: 1fr; }
+  .admin-tabs { flex-direction: column; }
+
+  /* Hide role badge in tight header */
+  .header-user-role { display: none; }
+
+  /* Leaflet map — full width, adjusted height */
+  .farm-map-container { border-radius: 8px; }
+
+  /* Farm list items — smaller gaps */
+  .premium-list-item { padding: 10px 14px; gap: 10px; }
+
+  /* Badges wrap text if needed */
+  .badge { white-space: normal; }
+
+  /* Sidebar brand compact */
+  .sidebar-brand h1 { font-size: 15px; }
 }

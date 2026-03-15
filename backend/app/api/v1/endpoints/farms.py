@@ -9,6 +9,7 @@ from app.models.farm import Farm as FarmModel
 from app.models.user import User as UserModel
 from app.core.auth import get_current_active_user, require_farmer_or_above
 from app.tasks.satellite_tasks import process_single_farm
+from app.tasks.auto_crop_risk_tasks import analyze_single_farm_risk
 from app.utils.rwanda_boundary import (
     validate_point_in_rwanda,
     validate_boundary_in_rwanda,
@@ -226,6 +227,11 @@ def create_farm(
             process_single_farm.delay(db_farm.id, 30)
         except Exception:
             pass  # Don't fail farm creation if Celery is unavailable
+        # Auto-trigger crop risk analysis
+        try:
+            analyze_single_farm_risk.delay(db_farm.id)
+        except Exception:
+            pass
 
     return _farm_to_out(db_farm)
 
@@ -294,6 +300,11 @@ def update_farm(
             process_single_farm.delay(db_farm.id, 30)
         except Exception:
             pass
+        # Auto-trigger crop risk analysis
+        try:
+            analyze_single_farm_risk.delay(db_farm.id)
+        except Exception:
+            pass
 
     return _farm_to_out(db_farm)
 
@@ -356,6 +367,18 @@ def auto_detect_farm_boundary(
             detail="Farm must have coordinates (latitude/longitude) to auto-detect boundary"
         )
 
+    # Require GEE to be available — surface a clear 503 instead of a vague 500
+    from app.core import gee_manager
+    if not gee_manager.is_initialized():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Satellite boundary detection is unavailable: Google Earth Engine is not "
+                "configured. Set GEE_SERVICE_ACCOUNT_EMAIL, GEE_PRIVATE_KEY_PATH, and "
+                "GEE_PROJECT environment variables and restart the server."
+            ),
+        )
+
     # Extract boundary using Dynamic World
     satellite_service = SatelliteDataService()
     result = satellite_service.extract_farm_boundary(
@@ -366,7 +389,7 @@ def auto_detect_farm_boundary(
 
     if not result['success']:
         raise HTTPException(
-            status_code=404,
+            status_code=422,
             detail=result.get('error', 'Failed to detect farm boundary')
         )
 

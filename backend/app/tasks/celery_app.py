@@ -19,6 +19,7 @@ celery_app.conf.include = [
     'app.tasks.weather_tasks',
     'app.tasks.ml_tasks',
     'app.tasks.process_tasks',
+    'app.tasks.auto_crop_risk_tasks',
 ]
 
 # Run periodic scanner every 10 minutes to auto-enqueue processing of new TIFFs
@@ -89,6 +90,13 @@ beat_schedule = {
     'ml-retrain-models-weekly': {
         'task': 'ml.retrain_all_models',
         'schedule': crontab(minute=0, hour=1, day_of_week='sunday'),  # Weekly on Sunday at 1 AM
+        'args': (),
+    },
+
+    # ============ AUTO CROP RISK PIPELINE ============
+    'auto-crop-risk-daily': {
+        'task': 'auto_crop_risk.analyze_all_farms',
+        'schedule': crontab(minute=30, hour=6),  # Daily at 06:30 UTC (after disease predictions)
         'args': (),
     },
 }

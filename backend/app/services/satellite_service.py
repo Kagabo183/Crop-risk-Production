@@ -20,41 +20,23 @@ class SatelliteDataService:
     """Service for satellite data acquisition and processing"""
     
     def __init__(self):
-        self.gee_initialized = False
-        self.use_planetary_computer = getattr(settings, 'USE_PLANETARY_COMPUTER', False)
-        
-        # Try to initialize Google Earth Engine
-        if not self.use_planetary_computer:
-            try:
-                self._initialize_gee()
-            except Exception as e:
-                logger.warning(f"Failed to initialize Google Earth Engine: {e}")
-                logger.info("Falling back to Microsoft Planetary Computer")
-                self.use_planetary_computer = True
-    
-    def _initialize_gee(self):
-        """Initialize Google Earth Engine with service account"""
-        try:
-            # Try service account authentication first (check if values are set, not just if attributes exist)
-            if settings.GEE_SERVICE_ACCOUNT_EMAIL and settings.GEE_PRIVATE_KEY_PATH:
-                credentials = ee.ServiceAccountCredentials(
-                    settings.GEE_SERVICE_ACCOUNT_EMAIL,
-                    settings.GEE_PRIVATE_KEY_PATH
-                )
-                ee.Initialize(credentials)
-                logger.info("✓ Google Earth Engine initialized with service account")
-            else:
-                # Fall back to default authentication with project ID
-                # Get project from env or use default
-                project = settings.GEE_PROJECT or 'principal-rhino-482514-f1'
-                logger.info(f"Initializing Google Earth Engine with project: {project}")
-                ee.Initialize(project=project)
+        from app.core import gee_manager  # import here to avoid circular at module load
+        # Use the app-wide singleton — never re-initialize per request
+        self.gee_initialized = gee_manager.is_initialized()
+        force_pc = getattr(settings, 'USE_PLANETARY_COMPUTER', False)
+        self.use_planetary_computer = force_pc or not self.gee_initialized
 
-            self.gee_initialized = True
-            logger.info("✓ Google Earth Engine initialized successfully with REAL data processing")
-        except Exception as e:
-            logger.error(f"Failed to initialize GEE: {e}")
-            raise
+    # _initialize_gee is retained only for direct/manual invocation (e.g. scripts).
+    def _initialize_gee(self):
+        """Initialize Google Earth Engine with service account (singleton wrapper)."""
+        from app.core import gee_manager
+        success = gee_manager.initialize()
+        self.gee_initialized = success
+        self.use_planetary_computer = not success
+        if not success:
+            raise RuntimeError(
+                gee_manager.get_error() or "GEE initialization failed"
+            )
     
     def fetch_sentinel2_imagery(
         self, 

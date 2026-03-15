@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     farms, stress_monitoring, farm_satellite, ml, admin,
     early_warning, pipeline, fetch_real_data, auth, parcels, advisory,
+    auto_crop_risk,
 )
 
 api_router = APIRouter()
@@ -17,3 +18,4 @@ api_router.include_router(early_warning.router, prefix="/early-warning", tags=["
 api_router.include_router(pipeline.router, prefix="/pipeline", tags=["pipeline"])
 api_router.include_router(fetch_real_data.router, tags=["real-data"])
 api_router.include_router(advisory.router, prefix="/advisory", tags=["advisory"])
+api_router.include_router(auto_crop_risk.router, prefix="/farm", tags=["auto-crop-risk"])

@@ -19,9 +19,11 @@ origins = [
     "http://localhost:3000",
     "http://localhost:8000",
     "http://127.0.0.1:3000",
-    # web-app (Vite dev server)
+    # web-app (Vite dev server — also accepts dynamically assigned ports)
     "http://localhost:5174",
     "http://127.0.0.1:5174",
+    "http://localhost:5176",
+    "http://127.0.0.1:5176",
     # mobile-app (Vite dev server / browser preview)
     "http://localhost:5175",
     "http://127.0.0.1:5175",
@@ -45,6 +47,13 @@ app.add_middleware(
 
 # Include API router with prefix
 app.include_router(api_router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize shared services once when the server starts."""
+    from app.core import gee_manager
+    gee_manager.initialize()
 
 # Health check endpoint
 @app.get("/api/v1/health")
