@@ -2,6 +2,32 @@ from sqlalchemy import Column, Integer, String, Float, Boolean, Date, DateTime, 
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
+
+class FarmVegetationMetric(Base):
+    __tablename__ = "farm_vegetation_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    farm_id = Column(Integer, ForeignKey('farms.id', ondelete='CASCADE'), nullable=False)
+    observation_date = Column(Date, nullable=False)
+
+    # Vegetation indices (summary stats)
+    ndvi_mean = Column(Float, nullable=True)
+    ndvi_min = Column(Float, nullable=True)
+    ndvi_max = Column(Float, nullable=True)
+    ndvi_std = Column(Float, nullable=True)
+    ndre_mean = Column(Float, nullable=True)
+    evi_mean = Column(Float, nullable=True)
+    savi_mean = Column(Float, nullable=True)
+
+    cloud_cover_percent = Column(Float, nullable=True)
+    health_score = Column(Float, nullable=True)
+    source = Column(String(50), nullable=True)
+
+    created_at = Column(DateTime, server_default=text('now()'), nullable=False)
+
+    # Relationship
+    farm = relationship("Farm", backref="vegetation_metrics")
+
 class SatelliteImage(Base):
     __tablename__ = "satellite_images"
     id = Column(Integer, primary_key=True, index=True)

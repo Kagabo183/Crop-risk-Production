@@ -65,12 +65,30 @@ async def startup_event():
 # ── Health check ──────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 def health_check():
+    import os
     from app.core import gee_manager
-    from app.core.config import settings
+    from app.core.config import settings, _ENV_FILE
+    from app.core.gee_manager import _resolve_key_path
+
+    raw_key  = getattr(settings, "GEE_PRIVATE_KEY_PATH", None)
+    resolved = _resolve_key_path(raw_key)
+    # Force a retry if not yet initialized
+    if not gee_manager.is_initialized():
+        gee_manager.initialize()
+
     return {
         "status": "healthy",
         "service": "crop-risk-backend",
         "gee": gee_manager.get_status(),
+        "gee_debug": {
+            "email": getattr(settings, "GEE_SERVICE_ACCOUNT_EMAIL", None),
+            "raw_key_path": raw_key,
+            "resolved_key_path": resolved,
+            "key_exists": os.path.isfile(resolved) if resolved else False,
+            "os_email": os.environ.get("GEE_SERVICE_ACCOUNT_EMAIL", "<not-in-os-env>"),
+            "os_key_path": os.environ.get("GEE_PRIVATE_KEY_PATH", "<not-in-os-env>"),
+            "env_file_used": str(_ENV_FILE),
+        },
         "planetary_computer_stac": settings.MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT,
         "use_planetary_computer": settings.USE_PLANETARY_COMPUTER,
     }

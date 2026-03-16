@@ -34,6 +34,14 @@ logger = logging.getLogger(__name__)
 NDVI_PALETTE = ["F44336", "FF5722", "FFC107", "CDDC39", "8BC34A", "4CAF50"]
 NDVI_VIS = {"min": 0.0, "max": 0.75, "palette": NDVI_PALETTE}
 
+# Per-index vis params  (NDRE and SAVI tend to be lower range)
+INDEX_VIS = {
+    "NDVI": {"min": -0.1, "max": 0.8,  "palette": NDVI_PALETTE},
+    "NDRE": {"min": -0.1, "max": 0.5,  "palette": NDVI_PALETTE},
+    "EVI":  {"min": -0.1, "max": 0.8,  "palette": NDVI_PALETTE},
+    "SAVI": {"min": -0.1, "max": 0.75, "palette": NDVI_PALETTE},
+}
+
 # MSAVI visual palette (same red→green)
 MSAVI_PALETTE = NDVI_PALETTE
 MSAVI_VIS = {"min": 0.0, "max": 0.75, "palette": MSAVI_PALETTE}
@@ -47,9 +55,14 @@ class NdviTileService:
         farm: Farm,
         db: Session,
         days_back: int = 30,
+        index: str = "NDVI",
     ) -> Dict[str, Any]:
         """
-        Return NDVI overlay information for a farm.
+        Return vegetation index overlay information for a farm.
+
+        Parameters
+        ----------
+        index : NDVI | NDRE | EVI | SAVI
 
         Returns dict containing:
           tile_url   – str | None   GEE/PC tile URL template (use {z}/{x}/{y})
@@ -62,9 +75,13 @@ class NdviTileService:
         if not (farm.latitude and farm.longitude):
             return self._empty_response(farm)
 
+        idx = index.upper() if index else "NDVI"
+        if idx not in ("NDVI", "NDRE", "EVI", "SAVI"):
+            idx = "NDVI"
+
         if gee_manager.is_initialized():
             try:
-                return self._get_gee_tiles(farm, days_back)
+                return self._get_gee_tiles(farm, days_back, idx)
             except Exception as exc:
                 logger.warning(
                     "GEE tile generation failed for farm %s: %s", farm.id, exc
@@ -74,7 +91,7 @@ class NdviTileService:
 
     # ── GEE path ────────────────────────────────────────────────────────────────
 
-    def _get_gee_tiles(self, farm: Farm, days_back: int) -> Dict[str, Any]:
+    def _get_gee_tiles(self, farm: Farm, days_back: int, index: str = "NDVI") -> Dict[str, Any]:
         import ee  # Import guarded – only available when GEE is initialised
 
         end = datetime.utcnow()
@@ -83,8 +100,10 @@ class NdviTileService:
         end_str = end.strftime("%Y-%m-%d")
 
         farm_geom, bounds_sw, bounds_ne = self._build_geom(farm)
+        if farm_geom is None:
+            raise ValueError(f"Could not build GEE geometry for farm {farm.id} (lat={farm.latitude}, lon={farm.longitude})")
 
-        # Sentinel-2 NDVI median composite
+        # Sentinel-2 SR collection
         s2 = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(farm_geom)
@@ -93,46 +112,70 @@ class NdviTileService:
         )
 
         count = s2.size().getInfo()
+        img    = s2.median() if count > 0 else None
+        source = "gee_sentinel2" if count > 0 else None
 
-        if count > 0:
-            ndvi_image = (
-                s2.median()
-                .normalizedDifference(["B8", "B4"])
-                .rename("NDVI")
-            )
-            source = "gee_sentinel2"
-        else:
-            # Landsat-9 fallback
+        if img is None:
+            # Landsat-9 fallback (NDVI only)
             lc9 = (
                 ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
                 .filterBounds(farm_geom)
                 .filterDate(start_str, end_str)
-                .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
             )
-            ndvi_image = lc9.median().rename("NDVI")
+            img    = lc9.median()
             source = "gee_landsat9"
 
-        # Mean NDVI statistic
-        mean_dict = ndvi_image.reduceRegion(
+            index_image = img.normalizedDifference(["SR_B5", "SR_B4"]).rename("result")
+        elif index == "NDVI":
+            index_image = img.normalizedDifference(["B8", "B4"]).rename("result")
+        elif index == "NDRE":
+            # Red-Edge Normalized Difference Vegetation Index
+            index_image = img.normalizedDifference(["B8A", "B5"]).rename("result")
+        elif index == "EVI":
+            # Enhanced Vegetation Index (Sentinel-2 scaled bands: DN / 10000)
+            # EVI = 2.5 * (NIR - R) / (NIR + 6*R - 7.5*B + 1)  [using reflectance 0-1]
+            index_image = img.expression(
+                "2.5 * ((NIR - R) / (NIR + 6.0 * R - 7.5 * B + 1.0))",
+                {
+                    "NIR": img.select("B8").divide(10000),
+                    "R":   img.select("B4").divide(10000),
+                    "B":   img.select("B2").divide(10000),
+                }
+            ).rename("result")
+        elif index == "SAVI":
+            # Soil Adjusted Vegetation Index  L=0.5
+            index_image = img.expression(
+                "1.5 * ((NIR - R) / (NIR + R + 0.5))",
+                {
+                    "NIR": img.select("B8").divide(10000),
+                    "R":   img.select("B4").divide(10000),
+                }
+            ).rename("result")
+        else:
+            index_image = img.normalizedDifference(["B8", "B4"]).rename("result")
+
+        # mean value statistic for the index
+        mean_dict = index_image.reduceRegion(
             reducer=ee.Reducer.mean(),
             geometry=farm_geom,
             scale=30,
             maxPixels=1_000_000,
         ).getInfo()
-        mean_ndvi = float(mean_dict.get("NDVI") or 0.3)
+        mean_val = float(mean_dict.get("result") or 0.3)
 
-        # Signed tile URL
-        map_id = ndvi_image.getMapId(NDVI_VIS)
-        tile_url = map_id["tile_fetcher"].url_format
+        # Tile URL with per-index vis params
+        vis = INDEX_VIS.get(index, INDEX_VIS["NDVI"])
+        map_id    = index_image.getMapId(vis)
+        tile_url  = map_id["tile_fetcher"].url_format
 
-        result = {
-            "tile_url": tile_url,
-            "bounds": [bounds_sw, bounds_ne],
-            "mean_ndvi": round(mean_ndvi, 4),
-            "source": source,
-            "date": end_str,
+        return {
+            "tile_url":  tile_url,
+            "bounds":    [bounds_sw, bounds_ne],
+            "mean_ndvi": round(mean_val, 4),
+            "source":    source,
+            "date":      end_str,
+            "index":     index,
         }
-        return result
 
     # ── DB fallback path ─────────────────────────────────────────────────────────
 

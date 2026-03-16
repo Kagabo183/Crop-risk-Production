@@ -5,10 +5,13 @@ Handles satellite imagery download, processing, and vegetation indices calculati
 import ee
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
+import os
+import threading
+import time
 from sqlalchemy.orm import Session
-from app.models.data import SatelliteImage, VegetationHealth
+from app.models.data import SatelliteImage, VegetationHealth, FarmVegetationMetric
 from app.models.farm import Farm
 from app.core.config import settings  # Use singleton instance, not Settings class
 import logging
@@ -179,18 +182,13 @@ class SatelliteDataService:
         farm_area: float = None
     ) -> Dict[str, float]:
         """
-        Calculate vegetation indices from satellite imagery
+        Calculate vegetation indices from satellite imagery, returning summary stats.
 
-        Args:
-            image_data: Image metadata from fetch_sentinel2_imagery
-            lat: Latitude of farm center
-            lon: Longitude of farm center
-            buffer_meters: Buffer radius around point in meters (default 50m, was 500m)
-            farm_boundary: GeoAlchemy2 Geometry object representing farm boundary (POLYGON)
-            farm_area: Farm area in hectares (for logging/validation)
-
-        Returns:
-            Dictionary with vegetation indices: {ndvi, ndre, ndwi, evi, savi}
+        Returns a dict with:
+        - ndvi_mean/min/max/std
+        - ndre_mean
+        - evi_mean
+        - savi_mean
         """
         if self.use_planetary_computer:
             return self._calculate_indices_planetary_computer(image_data, lat, lon, buffer_meters, farm_boundary, farm_area)
@@ -210,6 +208,14 @@ class SatelliteDataService:
         try:
             from geoalchemy2.shape import to_shape
             import json
+
+            # Avoid indefinitely hanging EE requests (best-effort; may be ignored by some environments)
+            deadline_ms = int(getattr(settings, 'GEE_REQUEST_DEADLINE_MS', 120000))
+            try:
+                if hasattr(ee, 'data') and hasattr(ee.data, 'setDeadline'):
+                    ee.data.setDeadline(deadline_ms)
+            except Exception:
+                pass
 
             image = image_data['image']
             point = ee.Geometry.Point([lon, lat])
@@ -253,54 +259,65 @@ class SatelliteDataService:
                 else:
                     logger.info(f"Using {buffer_meters}m buffer (area: {analyzed_area_ha:.2f} ha) - no farm area recorded")
 
-            # Select bands
+            # Select bands (raw DNs 0-10000)
             nir = image.select('B8')  # Near-Infrared
             red = image.select('B4')  # Red
             red_edge = image.select('B5')  # Red Edge
             green = image.select('B3')  # Green
             blue = image.select('B2')  # Blue
 
-            # Calculate NDVI: (NIR - Red) / (NIR + Red)
+            # Scale from DNs (0-10000) to reflectance (0-1) so index values are in the expected range
+            scale_factor = 10000
+            nir  = nir.divide(scale_factor)
+            red  = red.divide(scale_factor)
+            red_edge = red_edge.divide(scale_factor)
+            green = green.divide(scale_factor)
+            blue = blue.divide(scale_factor)
+
+            # Recompute indices on scaled bands
             ndvi = nir.subtract(red).divide(nir.add(red)).rename('NDVI')
-
-            # Calculate NDRE: (NIR - RedEdge) / (NIR + RedEdge)
             ndre = nir.subtract(red_edge).divide(nir.add(red_edge)).rename('NDRE')
-
-            # Calculate NDWI: (Green - NIR) / (Green + NIR)
-            ndwi = green.subtract(nir).divide(green.add(nir)).rename('NDWI')
-
-            # Calculate EVI: 2.5 * ((NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1))
-            evi = nir.subtract(red).divide(
+            evi  = nir.subtract(red).divide(
                 nir.add(red.multiply(6)).subtract(blue.multiply(7.5)).add(1)
             ).multiply(2.5).rename('EVI')
-
-            # Calculate SAVI: ((NIR - Red) / (NIR + Red + L)) * (1 + L), L=0.5
             L = 0.5
             savi = nir.subtract(red).divide(nir.add(red).add(L)).multiply(1 + L).rename('SAVI')
+            indices = ee.Image.cat([ndvi, ndre, evi, savi])
 
-            # Combine all indices
-            indices = ee.Image.cat([ndvi, ndre, ndwi, evi, savi])
-
-            # Calculate mean values over the region
+            # Single server round-trip: compute mean/min/max/stddev for all bands.
+            # We only use NDVI min/max/std, and means for the rest.
             stats = indices.reduceRegion(
-                reducer=ee.Reducer.mean(),
+                reducer=(ee.Reducer.mean()
+                         .combine(ee.Reducer.minMax(), sharedInputs=True)
+                         .combine(ee.Reducer.stdDev(), sharedInputs=True)),
                 geometry=region,
-                scale=10,  # 10m resolution
-                maxPixels=1e9
+                scale=10,
+                maxPixels=1e9,
+                bestEffort=True,
             ).getInfo()
 
-            return {
-                'ndvi': stats.get('NDVI'),
-                'ndre': stats.get('NDRE'),
-                'ndwi': stats.get('NDWI'),
-                'evi': stats.get('EVI'),
-                'savi': stats.get('SAVI')
+            result = {
+                'ndvi_mean': stats.get('NDVI_mean'),
+                'ndvi_min': stats.get('NDVI_min'),
+                'ndvi_max': stats.get('NDVI_max'),
+                'ndvi_std': stats.get('NDVI_stdDev'),
+                'ndre_mean': stats.get('NDRE_mean'),
+                'evi_mean':  stats.get('EVI_mean'),
+                'savi_mean': stats.get('SAVI_mean'),
             }
+            logger.info("✓ GEE vegetation indices for farm: NDVI=%s, NDRE=%s", result['ndvi_mean'], result['ndre_mean'])
+            return result
 
         except Exception as e:
             logger.error(f"🚨 CRITICAL: Error calculating vegetation indices with GEE: {e}", exc_info=True)
             return {
-                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'ndvi_mean': None,
+                'ndvi_min': None,
+                'ndvi_max': None,
+                'ndvi_std': None,
+                'ndre_mean': None,
+                'evi_mean': None,
+                'savi_mean': None,
                 'error': str(e)
             }
     
@@ -317,6 +334,12 @@ class SatelliteDataService:
         try:
             import rioxarray
             import planetary_computer as pc
+
+            # Best-effort protection against hanging remote COG reads via GDAL.
+            # Values are seconds.
+            os.environ.setdefault('CPL_VSIL_CURL_CONNECTTIMEOUT', str(getattr(settings, 'PC_COG_CONNECT_TIMEOUT_S', 20)))
+            os.environ.setdefault('CPL_VSIL_CURL_TIMEOUT', str(getattr(settings, 'PC_COG_TIMEOUT_S', 120)))
+            os.environ.setdefault('GDAL_HTTP_TIMEOUT', str(getattr(settings, 'PC_COG_TIMEOUT_S', 120)))
 
             item = image_data.get('item')
             if item is None:
@@ -353,50 +376,66 @@ class SatelliteDataService:
             import geopandas as gpd
             gdf = gpd.GeoDataFrame(geometry=[buffer], crs="EPSG:4326")
 
-            nir = nir.rio.clip(gdf.geometry, gdf.crs, drop=True)
-            red = red.rio.clip(gdf.geometry, gdf.crs, drop=True)
-            green = green.rio.clip(gdf.geometry, gdf.crs, drop=True)
+            clip_geom = [buffer]
+            nir = nir.rio.clip(clip_geom, gdf.crs, drop=True)
+            red = red.rio.clip(clip_geom, gdf.crs, drop=True)
+            green = green.rio.clip(clip_geom, gdf.crs, drop=True)
 
             # Convert to float
             nir = nir.astype(float)
             red = red.astype(float)
             green = green.astype(float)
 
-            # NDVI
-            ndvi = float(((nir - red) / (nir + red)).mean().values)
-
-            # NDWI
-            ndwi = float(((green - nir) / (green + nir)).mean().values)
+            # NDVI stats
+            ndvi_arr = (nir - red) / (nir + red)
+            ndvi_mean = float(ndvi_arr.mean().values)
+            ndvi_min = float(ndvi_arr.min().values)
+            ndvi_max = float(ndvi_arr.max().values)
+            ndvi_std = float(ndvi_arr.std().values)
 
             # EVI
-            evi = float((2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue.astype(float).rio.clip(gdf.geometry, gdf.crs, drop=True) + 1)).mean().values)
+            evi = float((2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue.astype(float).rio.clip(clip_geom, gdf.crs, drop=True) + 1)).mean().values)
 
             # SAVI (L=0.5)
             savi = float(((nir - red) / (nir + red + 0.5) * 1.5).mean().values)
 
             # NDRE
-            red_edge = red_edge.astype(float).rio.clip(gdf.geometry, gdf.crs, drop=True)
+            red_edge = red_edge.astype(float).rio.clip(clip_geom, gdf.crs, drop=True)
             ndre = float(((nir - red_edge) / (nir + red_edge)).mean().values)
 
-            logger.info(f"✓ Calculated REAL vegetation indices via Planetary Computer for ({lat}, {lon}) — NDVI: {ndvi:.4f}")
+            logger.info(f"✓ Calculated REAL vegetation indices via Planetary Computer for ({lat}, {lon}) — NDVI: {ndvi_mean:.4f}")
 
             return {
-                'ndvi': round(ndvi, 4),
-                'ndre': round(ndre, 4),
-                'ndwi': round(ndwi, 4),
-                'evi': round(evi, 4),
-                'savi': round(savi, 4),
+                'ndvi_mean': round(ndvi_mean, 4),
+                'ndvi_min': round(ndvi_min, 4),
+                'ndvi_max': round(ndvi_max, 4),
+                'ndvi_std': round(ndvi_std, 4),
+                'ndre_mean': round(ndre, 4),
+                'evi_mean': round(evi, 4),
+                'savi_mean': round(savi, 4),
             }
         except ImportError as e:
             logger.error(f"🚨 MISSING DEPENDENCY: {e}. Install rioxarray and planetary-computer (pip install rioxarray planetary-computer).")
             return {
-                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'ndvi_mean': None,
+                'ndvi_min': None,
+                'ndvi_max': None,
+                'ndvi_std': None,
+                'ndre_mean': None,
+                'evi_mean': None,
+                'savi_mean': None,
                 'error': f"Missing dependency: {str(e)}"
             }
         except Exception as e:
             logger.error(f"🚨 CRITICAL: Error calculating vegetation indices with Planetary Computer: {e}", exc_info=True)
             return {
-                'ndvi': None, 'ndre': None, 'ndwi': None, 'evi': None, 'savi': None,
+                'ndvi_mean': None,
+                'ndvi_min': None,
+                'ndvi_max': None,
+                'ndvi_std': None,
+                'ndre_mean': None,
+                'evi_mean': None,
+                'savi_mean': None,
                 'error': str(e)
             }
     
@@ -468,8 +507,9 @@ class SatelliteDataService:
         self,
         db: Session,
         farm_id: int,
-        days_back: int = 30
-    ) -> List[SatelliteImage]:
+        days_back: int = 30,
+        progress_cb: Optional[Callable[[int, str], None]] = None,
+    ) -> List[FarmVegetationMetric]:
         """
         Process satellite imagery for a farm
         
@@ -481,6 +521,44 @@ class SatelliteDataService:
         Returns:
             List of processed SatelliteImage records
         """
+        last_reported_pct = 0
+
+        def progress(percent: int, stage: str) -> None:
+            if not progress_cb:
+                return
+            try:
+                nonlocal last_reported_pct
+                pct = int(percent)
+                if pct < last_reported_pct:
+                    pct = last_reported_pct
+                last_reported_pct = pct
+                progress_cb(pct, stage)
+            except Exception:
+                return
+
+        def start_heartbeat(
+            start_pct: int,
+            end_pct: int,
+            stage_prefix: str,
+            interval_s: float = 10.0,
+        ) -> Tuple[threading.Event, threading.Thread]:
+            stop_event = threading.Event()
+
+            def _run() -> None:
+                if not progress_cb:
+                    return
+                pct = start_pct
+                t0 = time.time()
+                while not stop_event.wait(interval_s):
+                    elapsed = int(time.time() - t0)
+                    if pct < end_pct:
+                        pct += 1
+                    progress(pct, f"{stage_prefix} (still running: {elapsed}s)")
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+            return stop_event, thread
+
         # Get farm
         farm = db.query(Farm).filter(Farm.id == farm_id).first()
         if not farm:
@@ -495,6 +573,8 @@ class SatelliteDataService:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days_back)
 
+        progress(35, 'Querying Sentinel-2 imagery...')
+
         # Try Sentinel-2 first
         imagery = self.fetch_sentinel2_imagery(
             farm.latitude,
@@ -506,6 +586,7 @@ class SatelliteDataService:
         # Fall back to Landsat if no Sentinel-2 data
         if not imagery and self.gee_initialized:
             logger.info("No Sentinel-2 data, trying Landsat")
+            progress(38, 'No Sentinel-2 scenes. Querying Landsat...')
             imagery = self.fetch_landsat_imagery(
                 farm.latitude,
                 farm.longitude,
@@ -516,11 +597,14 @@ class SatelliteDataService:
         # If still nothing, widen search to 90 days
         if not imagery and days_back < 90:
             logger.info(f"No imagery in {days_back} days, expanding to 90 days")
+            progress(40, 'Expanding search window (up to 90 days)...')
             start_date = end_date - timedelta(days=90)
+            progress(42, 'Re-querying Sentinel-2 imagery...')
             imagery = self.fetch_sentinel2_imagery(
                 farm.latitude, farm.longitude, start_date, end_date
             )
             if not imagery and self.gee_initialized:
+                progress(44, 'Re-querying Landsat imagery...')
                 imagery = self.fetch_landsat_imagery(
                     farm.latitude, farm.longitude, start_date, end_date
                 )
@@ -528,55 +612,100 @@ class SatelliteDataService:
         if not imagery:
             logger.warning(f"No satellite imagery found for farm {farm_id}")
             return []
+
+        progress(45, f'Found {len(imagery)} scene(s). Computing vegetation indices...')
         
         # Process each image
-        processed_images = []
-        for img_data in imagery:
-            # Calculate vegetation indices using farm boundary if available
-            indices = self.calculate_vegetation_indices(
-                img_data,
-                farm.latitude,
-                farm.longitude,
-                buffer_meters=50,  # REDUCED from 500m to 50m
-                farm_boundary=farm.boundary,  # Use actual farm polygon
-                farm_area=farm.area  # Pass farm area for validation
-            )
-            
-            # Create database record
-            sat_image = SatelliteImage(
-                farm_id=farm_id,
-                date=img_data['date'].date(),
-                acquisition_date=img_data['date'],
-                region=farm.location or "Unknown",
-                image_type="multispectral",
-                file_path=img_data['id'],
-                source=img_data['source'],
-                cloud_cover_percent=img_data['cloud_cover'],
-                processing_status='completed',
-                mean_ndvi=indices.get('ndvi'),
-                mean_ndre=indices.get('ndre'),
-                mean_ndwi=indices.get('ndwi'),
-                mean_evi=indices.get('evi'),
-                mean_savi=indices.get('savi'),
-                extra_metadata={'image_id': img_data['id']}
-            )
-            
-            db.add(sat_image)
-            processed_images.append(sat_image)
+        processed_metrics = []
+        n_imgs = max(1, len(imagery))
+        for idx, img_data in enumerate(imagery):
+            start_pct = 45 + int((idx / n_imgs) * 14)
+            next_start = 45 + int(((idx + 1) / n_imgs) * 14)
+            end_pct = min(57, max(start_pct, next_start - 1))
 
+            stage_prefix = f'Computing indices ({idx + 1}/{n_imgs})...'
+            progress(start_pct, stage_prefix)
+
+            stop_event, hb_thread = start_heartbeat(
+                start_pct=start_pct,
+                end_pct=end_pct,
+                stage_prefix=stage_prefix,
+                interval_s=float(getattr(settings, 'SATELLITE_PROGRESS_HEARTBEAT_S', 10.0)),
+            )
+            # Calculate vegetation indices using farm boundary if available
+            try:
+                indices = self.calculate_vegetation_indices(
+                    img_data,
+                    farm.latitude,
+                    farm.longitude,
+                    buffer_meters=50,  # REDUCED from 500m to 50m
+                    farm_boundary=farm.boundary,  # Use actual farm polygon
+                    farm_area=farm.area  # Pass farm area for validation
+                )
+            finally:
+                stop_event.set()
+                try:
+                    hb_thread.join(timeout=0.2)
+                except Exception:
+                    pass
+
+            if not indices or indices.get('ndvi_mean') is None:
+                logger.warning("Skipping image %s due to missing NDVI", img_data.get('id'))
+                continue
+
+            ndvi_mean = indices.get('ndvi_mean')
+            health_score = max(0.0, min(100.0, (ndvi_mean + 1) * 50)) if ndvi_mean is not None else None
+
+            metric = FarmVegetationMetric(
+                farm_id=farm_id,
+                observation_date=img_data['date'].date(),
+                ndvi_mean=indices.get('ndvi_mean'),
+                ndvi_min=indices.get('ndvi_min'),
+                ndvi_max=indices.get('ndvi_max'),
+                ndvi_std=indices.get('ndvi_std'),
+                ndre_mean=indices.get('ndre_mean'),
+                evi_mean=indices.get('evi_mean'),
+                savi_mean=indices.get('savi_mean'),
+                cloud_cover_percent=img_data.get('cloud_cover'),
+                health_score=health_score,
+                source=img_data.get('source'),
+            )
+
+            db.add(metric)
+            processed_metrics.append(metric)
+
+            # Optional: persist legacy SatelliteImage metadata only when explicitly enabled
+            if getattr(settings, 'SATELLITE_STORE_RASTERS', False):
+                sat_image = SatelliteImage(
+                    farm_id=farm_id,
+                    date=img_data['date'].date(),
+                    acquisition_date=img_data['date'],
+                    region=farm.location or "Unknown",
+                    image_type="multispectral",
+                    file_path=img_data['id'],
+                    source=img_data['source'],
+                    cloud_cover_percent=img_data['cloud_cover'],
+                    processing_status='completed',
+                    mean_ndvi=indices.get('ndvi_mean'),
+                    mean_ndre=indices.get('ndre_mean'),
+                    mean_evi=indices.get('evi_mean'),
+                    mean_savi=indices.get('savi_mean'),
+                    extra_metadata={'image_id': img_data['id']}
+                )
+                db.add(sat_image)
+
+        progress(58, 'Saving vegetation metrics...')
         try:
             db.commit()
-            logger.info(f"✓ Successfully committed {len(processed_images)} images for farm {farm_id}")
-
-            # Verify the save worked
-            for img in processed_images:
-                logger.info(f"  - Saved: Farm {img.farm_id}, Date: {img.date}, NDVI: {img.mean_ndvi}")
+            logger.info(f"✓ Successfully committed {len(processed_metrics)} metric rows for farm {farm_id}")
         except Exception as commit_error:
             logger.error(f"✗ COMMIT FAILED for farm {farm_id}: {commit_error}")
             db.rollback()
             raise
 
-        return processed_images
+        progress(60, 'Vegetation metrics saved.')
+
+        return processed_metrics
 
     def extract_farm_boundary(
         self,

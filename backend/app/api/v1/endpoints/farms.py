@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
 from pydantic import BaseModel, ConfigDict, Field
+from geoalchemy2.shape import to_shape
 
 from app.db.database import get_db
 from app.models.farm import Farm as FarmModel
@@ -74,9 +75,16 @@ class FarmOut(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     planting_date: Optional[date] = None
+    season: Optional[str] = None
     growth_stage: Optional[dict] = None
     owner_id: Optional[int] = None
     has_boundary: bool = False
+    detected_crop:          Optional[str]   = None
+    crop_confidence:        Optional[float] = None
+    detected_growth_stage:  Optional[str]   = None
+    last_satellite_date:    Optional[date]  = None
+    crop_source:            Optional[str]   = None
+    boundary_geojson: Optional[dict] = None
 
 
 class FarmCreate(BaseModel):
@@ -88,6 +96,7 @@ class FarmCreate(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     planting_date: Optional[date] = None
+    season: Optional[str] = Field(None, max_length=50)
     boundary: Optional[dict] = Field(None, description="GeoJSON geometry (Polygon) for farm boundary")
 
 
@@ -100,6 +109,7 @@ class FarmUpdate(BaseModel):
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     planting_date: Optional[date] = None
+    season: Optional[str] = Field(None, max_length=50)
     boundary: Optional[dict] = Field(None, description="GeoJSON geometry (Polygon) for farm boundary")
 
 
@@ -109,6 +119,13 @@ class BoundarySaveRequest(BaseModel):
 
 def _farm_to_out(farm: FarmModel) -> dict:
     """Convert ORM Farm to dict with computed growth_stage."""
+    boundary_geojson = None
+    if getattr(farm, "boundary", None) is not None:
+        try:
+            boundary_geojson = to_shape(farm.boundary).__geo_interface__
+        except Exception:
+            boundary_geojson = None
+
     return {
         "id": farm.id,
         "name": farm.name,
@@ -119,9 +136,16 @@ def _farm_to_out(farm: FarmModel) -> dict:
         "latitude": farm.latitude,
         "longitude": farm.longitude,
         "planting_date": farm.planting_date,
+        "season": farm.season,
         "growth_stage": compute_growth_stage(farm.crop_type, farm.planting_date),
         "owner_id": farm.owner_id,
         "has_boundary": farm.boundary is not None,
+        "boundary_geojson": boundary_geojson,
+        "detected_crop":          farm.detected_crop,
+        "crop_confidence":        farm.crop_confidence,
+        "detected_growth_stage":  farm.detected_growth_stage,
+        "last_satellite_date":    farm.last_satellite_date,
+        "crop_source":            "ai" if farm.detected_crop else ("manual" if farm.crop_type else None),
     }
 
 
@@ -198,6 +222,12 @@ def create_farm(
             # Auto-calculate area from boundary if not provided
             if not farm.area:
                 farm.area = calculate_area_hectares(farm.boundary)
+
+            # Auto-derive centroid coordinates if missing
+            if not farm.latitude or not farm.longitude:
+                centroid = shapely_geom.centroid
+                farm.latitude = centroid.y
+                farm.longitude = centroid.x
         except Exception as e:
             raise HTTPException(
                 status_code=400,
@@ -214,6 +244,7 @@ def create_farm(
         latitude=farm.latitude,
         longitude=farm.longitude,
         planting_date=farm.planting_date,
+        season=farm.season,
         boundary=boundary_wkb,
         owner_id=current_user.id,
     )
@@ -281,13 +312,19 @@ def update_farm(
             # Auto-update area from boundary using geodesic calculation
             if 'area' not in update_data:
                 update_data['area'] = calculate_area_hectares(boundary_geojson)
+
+            # Auto-derive centroid coordinates if missing or if coordinates not supplied
+            if ('latitude' not in update_data or 'longitude' not in update_data) and shapely_geom.is_valid:
+                centroid = shapely_geom.centroid
+                update_data.setdefault('latitude', centroid.y)
+                update_data.setdefault('longitude', centroid.x)
         except Exception as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid boundary geometry: {str(e)}"
             )
 
-    coords_changed = 'latitude' in update_data or 'longitude' in update_data
+    coords_changed = 'latitude' in update_data or 'longitude' in update_data or 'boundary' in update_data
     for key, value in update_data.items():
         setattr(db_farm, key, value)
 
@@ -447,13 +484,30 @@ def save_farm_boundary(
         # Update area using geodesic calculation (accurate on Earth's surface)
         db_farm.area = calculate_area_hectares(boundary_geojson)
 
+        # Auto-derive centroid coordinates if absent
+        centroid = shapely_geom.centroid
+        db_farm.latitude = float(centroid.y)
+        db_farm.longitude = float(centroid.x)
+
         db.commit()
         db.refresh(db_farm)
+
+        # Auto-trigger satellite + risk analysis now that boundary exists
+        if db_farm.latitude and db_farm.longitude:
+            try:
+                process_single_farm.delay(db_farm.id, 30)
+            except Exception:
+                pass
+            try:
+                analyze_single_farm_risk.delay(db_farm.id)
+            except Exception:
+                pass
 
         return {
             "success": True,
             "farm_id": farm_id,
             "area_ha": db_farm.area,
+            "boundary_geojson": boundary_geojson,
             "message": f"Boundary saved successfully ({db_farm.area:.2f} hectares)"
         }
 

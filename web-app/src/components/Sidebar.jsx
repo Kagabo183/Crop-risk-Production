@@ -13,6 +13,10 @@ import {
   Calendar,
   Layers,
   BarChart2,
+  Activity,
+  Leaf,
+  Radio,
+  ChevronLeft,
 } from 'lucide-react'
 
 const ROLE_BADGE = {
@@ -30,7 +34,18 @@ export default function Sidebar({ open, onClose }) {
       label: 'Overview', items: [
         { to: '/', icon: LayoutDashboard, text: 'Dashboard' },
         ...(hasRole('admin', 'agronomist', 'farmer')
-          ? [{ to: '/farms', icon: MapPin, text: 'Farms' }] : []),
+          ? [{ to: '/farms', icon: MapPin, text: 'My Farms' }] : []),
+        { to: '/early-warning', icon: AlertTriangle, text: 'Alerts' },
+      ]
+    },
+    {
+      label: 'Satellite Intelligence', items: [
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/satellite-dashboard', icon: Satellite, text: 'Satellite Map' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/satellite', icon: Radio, text: 'Satellite Data' }] : []),
+        ...(hasRole('admin', 'agronomist', 'farmer')
+          ? [{ to: '/stress-monitoring', icon: Activity, text: 'Stress Monitor' }] : []),
       ]
     },
     {
@@ -40,12 +55,11 @@ export default function Sidebar({ open, onClose }) {
         ...(hasRole('admin', 'agronomist')
           ? [{ to: '/predictions', icon: ShieldAlert, text: 'Predictions' }] : []),
         ...(hasRole('admin', 'agronomist', 'farmer')
-          ? [{ to: '/satellite-dashboard', icon: Satellite, text: 'Satellite Map' }] : []),
-        { to: '/alerts', icon: AlertTriangle, text: 'Alerts' },
+          ? [{ to: '/risk-assessment', icon: Leaf, text: 'Risk Assessment' }] : []),
       ]
     },
     {
-      label: 'Precision Ag', items: [
+      label: 'Precision Agriculture', items: [
         ...(hasRole('admin', 'agronomist', 'farmer')
           ? [{ to: '/seasons', icon: Calendar, text: 'Seasons' }] : []),
         ...(hasRole('admin', 'agronomist')
@@ -73,30 +87,36 @@ export default function Sidebar({ open, onClose }) {
           <div className="sidebar-brand-icon">🌾</div>
           <div>
             <h1>CropRisk</h1>
-            <span>Prediction Platform</span>
+            <span>Precision Agriculture</span>
           </div>
+          <button className="sidebar-collapse-btn" onClick={onClose} title="Collapse sidebar">
+            <ChevronLeft size={16} />
+          </button>
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map(section => (
-            <div key={section.label}>
-              <div className="sidebar-section">{section.label}</div>
-              {section.items.map(item => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === '/'}
-                  className={({ isActive }) =>
-                    `sidebar-link${isActive ? ' active' : ''}`
-                  }
-                  onClick={onClose}
-                >
-                  <item.icon />
-                  {item.text}
-                </NavLink>
-              ))}
-            </div>
-          ))}
+          {NAV.map(section => {
+            const visibleItems = section.items.filter(Boolean)
+            if (visibleItems.length === 0) return null
+            return (
+              <div key={section.label} className="sidebar-group">
+                <div className="sidebar-section">{section.label}</div>
+                {visibleItems.map(item => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    className={({ isActive }) =>
+                      `sidebar-link${isActive ? ' active' : ''}`
+                    }
+                  >
+                    <span className="sidebar-link-icon"><item.icon size={16} /></span>
+                    <span className="sidebar-link-text">{item.text}</span>
+                  </NavLink>
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         <div className="sidebar-user">
@@ -125,12 +145,7 @@ export default function Sidebar({ open, onClose }) {
       </aside>
 
       {open && (
-        <div
-          onClick={onClose}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 99,
-          }}
-        />
+        <div className="sidebar-overlay" onClick={onClose} />
       )}
     </>
   )

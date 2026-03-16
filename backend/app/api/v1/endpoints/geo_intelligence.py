@@ -14,6 +14,10 @@ Routes:
   DELETE /geo/scouting/{obs_id}               – Delete observation
   POST /geo/scouting/{obs_id}/photo           – Attach photo to observation
   GET  /geo/farms/{farm_id}/crop-classification – Spectral crop type inference
+  GET  /geo/detect-fields                     – Auto-detect field boundaries (SNIC/GEE)
+  POST /geo/fields/{field_id}/classify        – Run NDVI curve crop classification on a user field
+  GET  /geo/fields/{field_id}/classification  – Get latest stored classification result
+  POST /geo/fields/classify-all               – Bulk-classify all user fields (max 50)
 """
 import json
 import logging
@@ -34,7 +38,7 @@ from app.core.auth import get_current_active_user, require_farmer_or_above
 from app.db.database import get_db
 from app.models.data import SatelliteImage, VegetationHealth
 from app.models.farm import Farm as FarmModel
-from app.models.geo_intelligence import ProductivityZone, ScoutingObservation
+from app.models.geo_intelligence import DetectedField, ProductivityZone, ScoutingObservation
 from app.models.phenology import PhenologyRecord
 from app.models.user import User as UserModel
 
@@ -166,24 +170,29 @@ def get_vegetation_timeline(
 def get_ndvi_tiles(
     farm_id: int,
     days_back: int = Query(30, ge=7, le=180),
+    index: str = Query("NDVI", regex="^(NDVI|NDRE|EVI|SAVI)$"),
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_active_user),
 ):
     """
-    Get NDVI tile info for Leaflet map overlay.
+    Get vegetation index tile info for Leaflet map overlay.
 
     When GEE is available, returns a signed tile URL template usable in
     `L.tileLayer(url)` or react-leaflet `<TileLayer url={...} />`.
 
     When GEE is unavailable, returns `tile_url: null` plus `color_hex` and
     `bounds` so the frontend can render a coloured polygon overlay instead.
+
+    Parameters
+    ----------
+    index : NDVI | NDRE | EVI | SAVI  (default NDVI)
     """
     farm = _get_farm(farm_id, db, current_user)
     if not (farm.latitude and farm.longitude):
         raise HTTPException(status_code=400, detail="Farm has no coordinates")
 
     from app.services.ndvi_tile_service import NdviTileService
-    info = NdviTileService().get_ndvi_tile_info(farm, db, days_back=days_back)
+    info = NdviTileService().get_ndvi_tile_info(farm, db, days_back=days_back, index=index)
     return {"farm_id": farm_id, **info}
 
 
@@ -701,3 +710,466 @@ def get_fusion_status(
     except Exception as e:
         logger.warning("Fusion status failed for farm %s: %s", farm_id, e)
         raise HTTPException(status_code=500, detail=f"Fusion status unavailable: {e}")
+
+
+# ── 13. Auto field boundary detection ────────────────────────────────────────
+
+@router.get("/detect-fields")
+def detect_fields(
+    bbox: str = Query(
+        ...,
+        description="Comma-separated west,south,east,north in WGS-84 degrees",
+        example="-1.95,-30.10,-1.90,-30.05",
+    ),
+    zoom: int = Query(12, ge=11, le=20, description="Leaflet zoom level (min 11)"),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
+    """
+    Auto-detect agricultural field boundaries for a map viewport bounding box.
+
+    Uses GEE Sentinel-2 SNIC superpixel segmentation + NDVI thresholding to
+    extract field polygons.  Results are cached in PostGIS for 7 days.
+
+    Query parameters
+    ----------------
+    bbox : str   "west,south,east,north"  (WGS-84 degrees)
+    zoom : int   Leaflet zoom level — must be >= 11 (rejected otherwise)
+
+    Returns
+    -------
+    GeoJSON FeatureCollection with detected field polygons.
+    Each feature carries:  ndvi_mean, area_ha, imagery_date, cloud_pct
+    """
+    # Parse and validate bbox
+    try:
+        parts = [float(x) for x in bbox.split(",")]
+        if len(parts) != 4:
+            raise ValueError
+        west, south, east, north = parts
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="bbox must be 'west,south,east,north' (four floats separated by commas)",
+        )
+
+    # Coordinate sanity
+    if not (-180 <= west < east <= 180) or not (-90 <= south < north <= 90):
+        raise HTTPException(status_code=400, detail="bbox coordinates out of range or inverted")
+
+    from app.services.field_segmentation import FieldSegmentationService
+    svc = FieldSegmentationService()
+    result = svc.detect_fields([west, south, east, north], zoom, db)
+    return result
+
+
+# ── 14. User-fields CRUD ──────────────────────────────────────────────────────
+#
+#  GET    /geo/fields                 – list current user's fields
+#  POST   /geo/fields                 – create / draw a new field
+#  GET    /geo/fields/{field_id}      – get single field
+#  PUT    /geo/fields/{field_id}      – update geometry / metadata
+#  DELETE /geo/fields/{field_id}      – delete field
+#  POST   /geo/detected-fields/{id}/promote – promote auto-detected → user field
+#
+# All endpoints require authentication; ownership enforced per-request.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class UserFieldCreate(BaseModel):
+    geojson: dict        = Field(..., description="GeoJSON Polygon geometry")
+    name:        Optional[str]   = Field(None, max_length=120)
+    crop_type:   Optional[str]   = Field(None, max_length=80)
+    notes:       Optional[str]   = None
+    color_hex:   Optional[str]   = Field(None, max_length=10)
+    farm_id:     Optional[int]   = None
+    source:      str             = Field("drawn", pattern=r"^(drawn|promoted|imported)$")
+
+
+class UserFieldUpdate(BaseModel):
+    geojson:    Optional[dict]   = Field(None, description="Updated GeoJSON Polygon geometry")
+    name:       Optional[str]    = Field(None, max_length=120)
+    crop_type:  Optional[str]    = Field(None, max_length=80)
+    notes:      Optional[str]    = None
+    color_hex:  Optional[str]    = Field(None, max_length=10)
+    farm_id:    Optional[int]    = None
+    is_archived: Optional[bool]  = None
+
+
+def _user_field_to_dict(uf) -> dict:
+    """Serialise a UserField row to a dict (geometry → GeoJSON)."""
+    from geoalchemy2.shape import to_shape
+    import json as _json
+    geom = None
+    if uf.geometry is not None:
+        try:
+            s = to_shape(uf.geometry)
+            geom = _json.loads(_json.dumps(s.__geo_interface__))
+        except Exception:
+            pass
+    return {
+        "id":               uf.id,
+        "owner_id":         uf.owner_id,
+        "farm_id":          uf.farm_id,
+        "geometry":         geom,
+        "name":             uf.name,
+        "crop_type":        uf.crop_type,
+        "area_ha":          round(uf.area_ha, 4) if uf.area_ha is not None else None,
+        "notes":            uf.notes,
+        "color_hex":        uf.color_hex,
+        "source":           uf.source,
+        "detected_field_id": uf.detected_field_id,
+        "is_archived":      uf.is_archived,
+        "created_at":       uf.created_at.isoformat() if uf.created_at else None,
+        "updated_at":       uf.updated_at.isoformat() if uf.updated_at else None,
+    }
+
+
+def _geojson_to_wkt_endpoint(geojson: dict) -> str:
+    """Convert GeoJSON geometry dict to WKT; raises HTTPException on invalid input."""
+    try:
+        from shapely.geometry import shape
+        s = shape(geojson)
+        if s.is_empty or s.geom_type not in ("Polygon", "MultiPolygon"):
+            raise ValueError("must be Polygon or MultiPolygon")
+        if s.geom_type == "MultiPolygon":
+            s = s.convex_hull
+        if not s.is_valid:
+            s = s.buffer(0)
+        return s.wkt
+    except (ValueError, Exception) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid geometry: {exc}")
+
+
+def _compute_area_ha(geojson: dict) -> float:
+    """Approximate area in hectares using shapely + pyproj equal-area projection."""
+    try:
+        from shapely.geometry import shape
+        from shapely.ops import transform as shapely_transform
+        import pyproj
+        proj = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:6933", always_xy=True).transform
+        geom = shapely_transform(proj, shape(geojson))
+        return geom.area / 10_000
+    except Exception:
+        return 0.0
+
+
+@router.get("/fields")
+def list_user_fields(
+    farm_id:    Optional[int]  = Query(None),
+    archived:   bool           = Query(False),
+    db:         Session        = Depends(get_db),
+    current_user: UserModel    = Depends(get_current_active_user),
+):
+    """List all field boundaries belonging to the current user."""
+    from app.models.geo_intelligence import UserField
+    q = db.query(UserField).filter(
+        UserField.owner_id   == current_user.id,
+        UserField.is_archived == archived,
+    )
+    if farm_id is not None:
+        q = q.filter(UserField.farm_id == farm_id)
+    fields = q.order_by(UserField.created_at.desc()).all()
+    return {"count": len(fields), "fields": [_user_field_to_dict(f) for f in fields]}
+
+
+@router.post("/fields", status_code=201)
+def create_user_field(
+    body:       UserFieldCreate,
+    db:         Session     = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
+    """Create a new field boundary polygon (drawn, imported, or promoted)."""
+    from app.models.geo_intelligence import UserField
+    wkt     = _geojson_to_wkt_endpoint(body.geojson)
+    area_ha = _compute_area_ha(body.geojson)
+
+    uf = UserField(
+        owner_id  = current_user.id,
+        farm_id   = body.farm_id,
+        geometry  = wkt,
+        name      = body.name,
+        crop_type = body.crop_type,
+        area_ha   = area_ha,
+        notes     = body.notes,
+        color_hex = body.color_hex,
+        source    = body.source,
+    )
+    db.add(uf)
+    db.commit()
+    db.refresh(uf)
+    return _user_field_to_dict(uf)
+
+
+@router.get("/fields/{field_id}")
+def get_user_field(
+    field_id:     int,
+    db:           Session     = Depends(get_db),
+    current_user: UserModel   = Depends(get_current_active_user),
+):
+    """Get a single user field by ID."""
+    from app.models.geo_intelligence import UserField
+    uf = db.query(UserField).filter(UserField.id == field_id).first()
+    if not uf:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if uf.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your field")
+    return _user_field_to_dict(uf)
+
+
+@router.put("/fields/{field_id}")
+def update_user_field(
+    field_id:     int,
+    body:         UserFieldUpdate,
+    db:           Session     = Depends(get_db),
+    current_user: UserModel   = Depends(get_current_active_user),
+):
+    """Update geometry and/or metadata of a user field."""
+    from app.models.geo_intelligence import UserField
+    uf = db.query(UserField).filter(UserField.id == field_id).first()
+    if not uf:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if uf.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your field")
+
+    if body.geojson is not None:
+        uf.geometry = _geojson_to_wkt_endpoint(body.geojson)
+        uf.area_ha  = _compute_area_ha(body.geojson)
+    if body.name        is not None: uf.name        = body.name
+    if body.crop_type   is not None: uf.crop_type   = body.crop_type
+    if body.notes       is not None: uf.notes        = body.notes
+    if body.color_hex   is not None: uf.color_hex   = body.color_hex
+    if body.farm_id     is not None: uf.farm_id      = body.farm_id
+    if body.is_archived is not None: uf.is_archived  = body.is_archived
+
+    db.commit()
+    db.refresh(uf)
+    return _user_field_to_dict(uf)
+
+
+@router.delete("/fields/{field_id}", status_code=204)
+def delete_user_field(
+    field_id:     int,
+    db:           Session     = Depends(get_db),
+    current_user: UserModel   = Depends(get_current_active_user),
+):
+    """Permanently delete a user field boundary."""
+    from app.models.geo_intelligence import UserField
+    uf = db.query(UserField).filter(UserField.id == field_id).first()
+    if not uf:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if uf.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your field")
+    db.delete(uf)
+    db.commit()
+    return None
+
+
+@router.post("/fields/classify-all", status_code=200)
+def classify_all_user_fields(
+    farm_id:      Optional[int] = Query(None, description="Limit to specific farm"),
+    db:           Session       = Depends(get_db),
+    current_user: UserModel     = Depends(get_current_active_user),
+):
+    """
+    Run crop classification on all non-archived user fields owned by the
+    current user. Optionally filtered to a single farm. Max 50 fields per call.
+    """
+    from app.models.geo_intelligence import UserField, FieldCropClassification
+    from app.services.field_classification_service import classify_field
+    from geoalchemy2.shape import to_shape as _to_shape
+
+    q = (
+        db.query(UserField)
+        .filter(UserField.owner_id == current_user.id, UserField.is_archived == False)  # noqa: E712
+    )
+    if farm_id is not None:
+        q = q.filter(UserField.farm_id == farm_id)
+    fields = q.limit(50).all()
+
+    results = []
+    for uf in fields:
+        try:
+            geom_wkt = _to_shape(uf.geometry).wkt
+            result   = classify_field(geometry_wkt=geom_wkt, declared_crop=uf.crop_type)
+
+            db.query(FieldCropClassification).filter(
+                FieldCropClassification.user_field_id == uf.id
+            ).delete(synchronize_session=False)
+
+            cls_row = FieldCropClassification(
+                user_field_id    = uf.id,
+                predicted_crop   = result["predicted_crop"],
+                confidence       = result["confidence"],
+                all_scores       = result["all_scores"],
+                growth_stage     = result["growth_stage"],
+                stage_confidence = result["stage_confidence"],
+                ndvi_timeseries  = result["ndvi_timeseries"],
+                curve_features   = result["curve_features"],
+                source           = result["source"],
+            )
+            db.add(cls_row)
+
+            if result["confidence"] >= 0.50 and not uf.crop_type:
+                uf.crop_type = result["predicted_crop"]
+
+            results.append({
+                "field_id":       uf.id,
+                "field_name":     uf.name,
+                "predicted_crop": result["predicted_crop"],
+                "confidence":     result["confidence"],
+                "growth_stage":   result["growth_stage"],
+                "source":         result["source"],
+            })
+        except Exception as exc:
+            logger.warning("classify_all: failed for field %s: %s", uf.id, exc)
+            results.append({"field_id": uf.id, "error": str(exc)})
+
+    db.commit()
+    return {"classified": len(results), "results": results}
+
+
+@router.post("/fields/{field_id}/classify", status_code=201)
+def classify_user_field(
+    field_id:     int,
+    db:           Session   = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
+    """
+    Extract a 12-month NDVI time-series for a user field via GEE and classify
+    its crop type using growth-curve template matching.
+
+    Stores the result in field_crop_classifications (replacing any prior result).
+    Also auto-updates the field\'s crop_type when confidence >= 0.50 and no type
+    was declared yet.
+    """
+    from app.models.geo_intelligence import UserField, FieldCropClassification
+    from app.services.field_classification_service import classify_field
+    from geoalchemy2.shape import to_shape as _to_shape
+
+    uf = db.query(UserField).filter(UserField.id == field_id).first()
+    if not uf:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if uf.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your field")
+
+    geom_wkt = _to_shape(uf.geometry).wkt
+    result   = classify_field(geometry_wkt=geom_wkt, declared_crop=uf.crop_type)
+
+    db.query(FieldCropClassification).filter(
+        FieldCropClassification.user_field_id == field_id
+    ).delete(synchronize_session=False)
+
+    cls_row = FieldCropClassification(
+        user_field_id    = field_id,
+        predicted_crop   = result["predicted_crop"],
+        confidence       = result["confidence"],
+        all_scores       = result["all_scores"],
+        growth_stage     = result["growth_stage"],
+        stage_confidence = result["stage_confidence"],
+        ndvi_timeseries  = result["ndvi_timeseries"],
+        curve_features   = result["curve_features"],
+        source           = result["source"],
+    )
+    db.add(cls_row)
+
+    if result["confidence"] >= 0.50 and not uf.crop_type:
+        uf.crop_type = result["predicted_crop"]
+
+    db.commit()
+    db.refresh(cls_row)
+
+    return {
+        "field_id":          field_id,
+        "classification_id": cls_row.id,
+        **result,
+        "classified_at":     cls_row.classified_at.isoformat(),
+    }
+
+
+@router.get("/fields/{field_id}/classification")
+def get_field_classification(
+    field_id:     int,
+    db:           Session   = Depends(get_db),
+    current_user: UserModel = Depends(get_current_active_user),
+):
+    """
+    Return the latest stored crop classification for a user field.
+    404 if no classification has been run yet.
+    """
+    from app.models.geo_intelligence import UserField, FieldCropClassification
+
+    uf = db.query(UserField).filter(UserField.id == field_id).first()
+    if not uf:
+        raise HTTPException(status_code=404, detail="Field not found")
+    if uf.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your field")
+
+    cls_row = (
+        db.query(FieldCropClassification)
+        .filter(FieldCropClassification.user_field_id == field_id)
+        .order_by(FieldCropClassification.classified_at.desc())
+        .first()
+    )
+    if not cls_row:
+        raise HTTPException(
+            status_code=404,
+            detail="No classification found. POST /fields/{id}/classify to run.",
+        )
+
+    return {
+        "field_id":          field_id,
+        "classification_id": cls_row.id,
+        "predicted_crop":    cls_row.predicted_crop,
+        "confidence":        cls_row.confidence,
+        "all_scores":        cls_row.all_scores,
+        "growth_stage":      cls_row.growth_stage,
+        "stage_confidence":  cls_row.stage_confidence,
+        "ndvi_timeseries":   cls_row.ndvi_timeseries,
+        "curve_features":    cls_row.curve_features,
+        "source":            cls_row.source,
+        "classified_at":     cls_row.classified_at.isoformat(),
+    }
+
+
+@router.post("/detected-fields/{detected_id}/promote", status_code=201)
+def promote_detected_field(
+    detected_id:  int,
+    body:         UserFieldUpdate = None,
+    db:           Session         = Depends(get_db),
+    current_user: UserModel       = Depends(get_current_active_user),
+):
+    """
+    Promote an auto-detected field boundary to a permanent user field.
+
+    Copies the geometry from detected_fields into user_fields with source='promoted'.
+    Optional body can supply name, crop_type, color_hex, farm_id.
+    """
+    from app.models.geo_intelligence import DetectedField, UserField
+    from geoalchemy2.shape import to_shape
+    import json as _json
+
+    df = db.query(DetectedField).filter(DetectedField.id == detected_id).first()
+    if not df:
+        raise HTTPException(status_code=404, detail="Detected field not found")
+
+    # Convert PostGIS geometry → WKT
+    s   = to_shape(df.geometry)
+    wkt = s.wkt
+
+    uf = UserField(
+        owner_id          = current_user.id,
+        farm_id           = (body.farm_id if body else None),
+        geometry          = wkt,
+        name              = (body.name if body else None),
+        crop_type         = (body.crop_type if body else None),
+        area_ha           = df.area_ha,
+        notes             = (body.notes if body else None),
+        color_hex         = (body.color_hex if body else "#F5C518"),
+        source            = "promoted",
+        detected_field_id = detected_id,
+    )
+    db.add(uf)
+    db.commit()
+    db.refresh(uf)
+    return _user_field_to_dict(uf)
+

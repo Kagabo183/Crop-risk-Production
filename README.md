@@ -209,19 +209,24 @@ The left sidebar and visible pages adapt dynamically based on the logged-in user
 
 ### Sidebar Navigation Map
 
-| Section | Page | URL | Roles |
-|---------|------|-----|-------|
-| Overview | Dashboard | `/` | All |
-| Overview | Farms | `/farms` | Admin, Agronomist |
-| Analysis | Disease Classifier | `/disease-classifier` | Admin, Agronomist |
-| Analysis | Predictions | `/predictions` | Admin, Agronomist |
-| Analysis | Satellite Map | `/satellite-dashboard` | Admin, Agronomist |
-| Analysis | Alerts | `/alerts` | All |
-| Precision Ag | Seasons | `/seasons` | Admin, Agronomist |
-| Precision Ag | VRA Maps | `/vra` | Admin, Agronomist |
-| Precision Ag | Yield Analysis | `/yield-analysis` | Admin, Agronomist |
-| Admin | Admin Panel | `/admin` | Admin only |
-| Account | Profile | `/profile` | All |
+The sidebar is organised into labelled groups. Use the **☰** button in the header to open it, and the **‹** chevron inside the sidebar brand to collapse it.
+
+| Group | Page | URL | Roles |
+|-------|------|-----|-------|
+| **Overview** | Dashboard | `/` | All |
+| **Overview** | My Farms | `/farms` | All |
+| **Overview** | Alerts | `/early-warning` | All |
+| **Satellite Intelligence** | Satellite Map | `/satellite-dashboard` | All |
+| **Satellite Intelligence** | Satellite Data | `/satellite` | All |
+| **Satellite Intelligence** | Stress Monitor | `/stress-monitoring` | All |
+| **Analysis** | Disease Classifier | `/disease-classifier` | All |
+| **Analysis** | Predictions | `/predictions` | Admin, Agronomist |
+| **Analysis** | Risk Assessment | `/risk-assessment` | All |
+| **Precision Agriculture** | Seasons | `/seasons` | All |
+| **Precision Agriculture** | VRA Maps | `/vra` | Admin, Agronomist |
+| **Precision Agriculture** | Yield Analysis | `/yield-analysis` | All |
+| **Admin** | Admin Panel | `/admin` | Admin only |
+| **Account** | Profile | `/profile` | All |
 
 ---
 
@@ -246,22 +251,44 @@ The left sidebar and visible pages adapt dynamically based on the logged-in user
 
 ### Dashboard
 
-**URL:** `/` | **Roles:** All (two distinct views)
+**URL:** `/` | **Roles:** All
 
-**Farmer View:**
-- **Field Health Pulse** card — overall NDVI-based health percentage (Optimal / Monitor / Critical).
-- **Quick Stats** — total managed farms + number of at-risk farms.
-- **Active Farm Alerts** — top 3 non-low alerts with severity indicator (🔴 Crisis / 🟠 High).
-- **Action Launchers** — quick links to Disease Classifier and Farms.
-- **My Production Units** — list of up to 5 farms with per-farm health summaries.
+The dashboard is a single unified view that adapts its data to the logged-in user's farm portfolio. It loads in parallel with skeleton placeholders while fetching data.
 
-**Admin / Agronomist View:**
-- **KPI Cards Row** — Total Farms, Healthy count, Stressed count, Active Disease Alerts, ML Model status.
-- **Satellite Coverage** panel showing the date of latest satellite pass.
-- **Fleet Health Chart** — bar chart of NDVI distribution across all farms.
-- **Recent Predictions** table — last 5 disease risk predictions with risk level badges.
-- **Average NDVI Trend** — 30-day Recharts line chart.
-- **Risk Map Preview** — mini Leaflet map showing farm markers colour-coded by health status.
+**Hero Header**
+- Time-of-day greeting with the user's first name.
+- Subtitle showing total farms monitored and time since last satellite pass.
+- Four at-a-glance metric badges: **Farms · Avg Health · At Risk · Last Satellite**.
+
+**KPI Card Row** (5 cards across)
+- **Total Farms** — count of registered farms.
+- **Fields Monitored** — farms with at least one satellite acquisition.
+- **Avg Health Score** — portfolio mean composite health (colour-coded green / amber / red).
+- **Fields At Risk** — farms currently in High Stress status.
+- **ML Models Active** — loaded/total ML models (admin and agronomist only).
+
+**Production Units panel** (main column)
+- Lists up to 6 farms with a circular **HealthGauge** SVG (green ≥ 70, amber 40–69, red < 40).
+- Each row shows: crop type (AI-detected or manual), area in ha, time since last satellite pass, health badge, and quick links to the Satellite Map and Farm Details.
+
+**Vegetation Timeline panel** (main column)
+- 90-day NDVI / NDRE / EVI line chart for the first farm, powered by `VegetationTimeline`.
+- Shows crop name, growth stage, and threshold reference lines.
+
+**NDVI Field Ranking** (main column — admin/agronomist)
+- Horizontal bar chart ranking all farms by current NDVI value.
+
+**Satellite Intelligence summary** (side column)
+- Shows latest NDVI, NDRE, EVI, NDWI, Stress Level and Last Observation for the featured farm.
+
+**Health Distribution pie chart** (side column)
+- Donut chart split by Healthy / Moderate / Stressed farm count.
+
+**Active Alerts panel** (side column)
+- Up to 5 non-low alerts with dot indicators and severity tags.
+
+**Quick Actions grid** (side column)
+- Four one-click tiles: Add Farm, Satellite Map, Disease AI, View Alerts.
 
 ---
 

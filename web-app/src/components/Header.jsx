@@ -8,7 +8,7 @@ const ROLE_BADGE = {
   farmer: { label: 'Farmer', color: '#2E7D32', bg: '#E8F5E9' },
 }
 
-export default function Header({ titles, apiStatus, onMenuClick }) {
+export default function Header({ titles, apiStatus, sidebarOpen, onMenuClick }) {
   const { pathname } = useLocation()
   const { user } = useAuth()
   const title = titles[pathname] || 'Crop Risk Platform'
@@ -17,9 +17,11 @@ export default function Header({ titles, apiStatus, onMenuClick }) {
   return (
     <header className="header">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button className="mobile-menu-btn" onClick={onMenuClick}>
-          <Menu size={22} />
-        </button>
+        {!sidebarOpen && (
+          <button className="mobile-menu-btn" onClick={onMenuClick} title="Open sidebar">
+            <Menu size={22} />
+          </button>
+        )}
         <h2 className="header-title">{title}</h2>
       </div>
       <div className="header-right">

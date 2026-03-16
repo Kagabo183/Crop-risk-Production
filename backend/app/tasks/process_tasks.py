@@ -15,6 +15,16 @@ from app.models.alert import Alert
 from app.services.disease_intelligence import DiseaseModelEngine
 from app.services.weather_service import WeatherDataIntegrator
 from app.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Optional S3 support: upload processed satellite files to S3 when
+# `SATELLITE_LOCAL_STORAGE_ENABLED` is False and S3 is configured.
+try:
+    from app.services.storage import upload_file as s3_upload
+except Exception:
+    s3_upload = None
 
 
 def compute_mean_ndvi_file(tif_path: str) -> float:
@@ -71,15 +81,35 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
     `DATABASE_URL` env var must be set for DB writes. If DB is unavailable, the task
     will write to `data/ndvi_means.json` as a fallback.
     """
-    if not settings.SATELLITE_LOCAL_STORAGE_ENABLED:
-        return {
-            'skipped': True,
-            'reason': 'local satellite storage disabled',
-            'file_path': file_path,
-        }
-    mean = compute_mean_ndvi_file(file_path)
+    # Compute NDVI mean from the input file path. We keep `local_path`
+    # as the source on disk and `store_path` as the canonical path that
+    # will be persisted (may become an `s3://` URI if uploaded).
+    local_path = file_path
+    store_path = file_path
+
+    mean = compute_mean_ndvi_file(local_path)
+    # If local storage is disabled, try to upload the file to S3 and
+    # store the resulting s3:// URI in the DB.
+    if s3_upload and settings.SATELLITE_UPLOAD_ON_PROCESS and settings.S3_BUCKET_NAME:
+        try:
+            key = f"satellite/{Path(local_path).name}"
+            logger.info("Uploading %s -> s3://%s/%s", local_path, settings.S3_BUCKET_NAME, key)
+            s3_uri = s3_upload(local_path, key)
+            store_path = s3_uri
+            logger.info("Upload complete: %s", s3_uri)
+            # delete local copy if configured to do so
+            if settings.SATELLITE_UPLOAD_DELETE_LOCAL:
+                try:
+                    Path(local_path).unlink()
+                    logger.info("Deleted local file: %s", local_path)
+                except Exception:
+                    # log but do not fail the task
+                    logger.exception("Failed to delete local file: %s", local_path)
+        except Exception:
+            # upload failed; continue using local_path as store_path
+            store_path = local_path
     db_url = os.environ.get('DATABASE_URL')
-    record = {'file_path': file_path, 'mean_ndvi': mean}
+    record = {'file_path': store_path, 'mean_ndvi': mean}
 
     if not db_url:
         # write to JSON fallback
@@ -89,7 +119,7 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
             data = {}
             if out.exists():
                 data = json.loads(out.read_text(encoding='utf-8'))
-            data[file_path] = mean
+            data[store_path] = mean
             out.write_text(json.dumps(data, indent=2), encoding='utf-8')
         except Exception as e:
             raise
@@ -101,7 +131,7 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
     try:
         existing = conn.execute(
             text('SELECT id, extra_metadata FROM satellite_images WHERE file_path = :fp'),
-            {'fp': file_path},
+            {'fp': store_path},
         ).fetchone()
         if existing:
             row_id = existing[0]
@@ -121,11 +151,13 @@ def process_image_task(self, file_path: str, date: str = None, region: str = Non
                 data = {}
                 if out.exists():
                     data = json.loads(out.read_text(encoding='utf-8'))
-                data[file_path] = mean
+                data[store_path] = mean
                 out.write_text(json.dumps(data, indent=2), encoding='utf-8')
             else:
-                conn.execute(text('INSERT INTO satellite_images (date, region, image_type, file_path, extra_metadata) VALUES (:date,:region,:type,:fp,:meta)'),
-                             {'date': date, 'region': region, 'type': 'NDVI', 'fp': file_path, 'meta': json.dumps({'mean_ndvi': mean})})
+                conn.execute(
+                    text('INSERT INTO satellite_images (date, region, image_type, file_path, extra_metadata) VALUES (:date,:region,:type,:fp,:meta)'),
+                    {'date': date, 'region': region, 'type': 'NDVI', 'fp': store_path, 'meta': json.dumps({'mean_ndvi': mean})},
+                )
     finally:
         conn.close()
         engine.dispose()

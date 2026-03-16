@@ -1,5 +1,11 @@
-﻿from pydantic_settings import BaseSettings
+﻿from pathlib import Path
+from pydantic_settings import BaseSettings
 from typing import Optional
+
+# Resolve .env: prefer repo-root .env, fall back to backend/.env
+_repo_root_env = Path(__file__).resolve().parents[3] / ".env"
+_backend_env = Path(__file__).resolve().parents[2] / ".env"
+_ENV_FILE = str(_repo_root_env) if _repo_root_env.exists() else str(_backend_env)
 
 
 class Settings(BaseSettings):
@@ -88,9 +94,16 @@ class Settings(BaseSettings):
 
     # ── Satellite storage mode ─────────────────────────────────────────────────
     SATELLITE_LOCAL_STORAGE_ENABLED: bool = True
+    # When True, processed satellite files will be uploaded to S3 (if S3 configured)
+    SATELLITE_UPLOAD_ON_PROCESS: bool = True
+    # When True and upload succeeds, delete the local copy after uploading
+    SATELLITE_UPLOAD_DELETE_LOCAL: bool = False
+    # New defaults: do not persist rasters; metrics-only pipeline
+    SATELLITE_STORE_RASTERS: bool = False
+    SATELLITE_STORE_TILES: bool = False
 
     class Config:
-        env_file = ".env"
+        env_file = _ENV_FILE
         case_sensitive = True
         extra = "ignore"
 

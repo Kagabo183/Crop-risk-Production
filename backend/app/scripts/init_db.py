@@ -20,6 +20,7 @@ def init_db():
     from app.models.data import SatelliteImage, WeatherRecord, VegetationHealth, DiseaseClassification  # noqa
     from app.models.prediction import Prediction  # noqa
     from app.models.disease import Disease, DiseasePrediction, DiseaseObservation, DiseaseModelConfig, WeatherForecast  # noqa
+    from app.models.geo_intelligence import ProductivityZone, ScoutingObservation, NdviOverlay, DetectedField  # noqa
     try:
         from app.models.crop_label import CropLabel  # noqa
     except Exception:

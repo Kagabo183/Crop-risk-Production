@@ -50,34 +50,29 @@ services:
       - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - SATELLITE_LOCAL_STORAGE_ENABLED=false
+      - SATELLITE_LOCAL_STORAGE_ENABLED=${SATELLITE_LOCAL_STORAGE_ENABLED:-true}
       - MODEL_DIR=/app/data/models
       - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
+      - GEE_SERVICE_ACCOUNT_EMAIL=crop-detection@principal-rhino-482514-f1.iam.gserviceaccount.com
+      - GEE_PRIVATE_KEY_PATH=/app/keys/principal-rhino-482514-f1-63f143120c82.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-true}
+      - ERA5_API_KEY=${ERA5_API_KEY}
+      - NOAA_API_KEY=${NOAA_API_KEY}
+      - MAPBOX_TOKEN=${MAPBOX_TOKEN}
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./logs:/app/logs:cached
       - ./ml:/app/ml:cached
       # GEE service-account key (do NOT commit the JSON file to git).
-      # Place the key at ./Gee_Key/gee-service-account.json on the host.
       - ./Gee_Key:/app/keys:ro
       # Google Earth Engine OAuth credentials (legacy / application-default)
       - ./data/earthengine:/root/.config/earthengine:cached
       # Copernicus (ERA5) cdsapi configuration
       - ./.cdsapirc:/root/.cdsapirc:ro
-    environment:
-      - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - SATELLITE_LOCAL_STORAGE_ENABLED=false
-      - MODEL_DIR=/app/data/models
-      - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
-      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
-      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
-      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
-      - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
-      - ERA5_API_KEY=${ERA5_API_KEY}
-      - NOAA_API_KEY=${NOAA_API_KEY}
+    
+
+  worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -110,14 +105,12 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
-      - SATELLITE_LOCAL_STORAGE_ENABLED=false
-      - COPERNICUS_USERNAME=${COPERNICUS_USERNAME}
-      - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD}
+      - SATELLITE_LOCAL_STORAGE_ENABLED=${SATELLITE_LOCAL_STORAGE_ENABLED:-true}
       - MODEL_DIR=/app/data/models
       - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
-      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
-      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
-      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
+      - GEE_SERVICE_ACCOUNT_EMAIL=crop-detection@principal-rhino-482514-f1.iam.gserviceaccount.com
+      - GEE_PRIVATE_KEY_PATH=/app/keys/principal-rhino-482514-f1-63f143120c82.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-true}
       - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
       - ERA5_API_KEY=${ERA5_API_KEY}
       - NOAA_API_KEY=${NOAA_API_KEY}
@@ -155,13 +148,11 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://postgres:1234@db:5432/crop_risk_db
-      - SATELLITE_LOCAL_STORAGE_ENABLED=false
-      - COPERNICUS_USERNAME=${COPERNICUS_USERNAME}
-      - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD}
+      - SATELLITE_LOCAL_STORAGE_ENABLED=${SATELLITE_LOCAL_STORAGE_ENABLED:-true}
       - GEE_PROJECT=${GEE_PROJECT:-principal-rhino-482514-f1}
-      - GEE_SERVICE_ACCOUNT_EMAIL=${GEE_SERVICE_ACCOUNT_EMAIL}
-      - GEE_PRIVATE_KEY_PATH=/app/keys/gee-service-account.json
-      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-false}
+      - GEE_SERVICE_ACCOUNT_EMAIL=crop-detection@principal-rhino-482514-f1.iam.gserviceaccount.com
+      - GEE_PRIVATE_KEY_PATH=/app/keys/principal-rhino-482514-f1-63f143120c82.json
+      - USE_PLANETARY_COMPUTER=${USE_PLANETARY_COMPUTER:-true}
       - MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT=${MICROSOFT_PLANETARY_COMPUTER_API_STATIC_DOCUMENT:-https://planetarycomputer.microsoft.com/api/stac/v1}
       - ERA5_API_KEY=${ERA5_API_KEY}
       - NOAA_API_KEY=${NOAA_API_KEY}
@@ -177,7 +168,7 @@ services:
     depends_on:
       - web
     environment:
-      - VITE_API_URL=http://web:8000
+      - VITE_API_URL=http://localhost:8000
     volumes:
       - ./web-app:/app:cached
       - /app/node_modules
@@ -193,7 +184,7 @@ services:
     depends_on:
       - web
     environment:
-      - VITE_API_URL=http://web:8000
+      - VITE_API_URL=http://localhost:8000
     volumes:
       - ./mobile-app:/app:cached
       - /app/node_modules

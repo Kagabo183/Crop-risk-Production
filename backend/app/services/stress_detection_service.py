@@ -78,8 +78,8 @@ class StressDetectionService:
         
         # Get latest NDVI and NDWI
         latest = veg_health[0]
-        current_ndvi = latest.ndvi or 0
-        current_ndwi = latest.ndwi or 0
+        current_ndvi = latest.ndvi   # Keep as None if not available
+        current_ndwi = latest.ndwi   # Keep as None if not available
         
         # Calculate NDVI trend
         if len(veg_health) >= 2:
@@ -111,26 +111,28 @@ class StressDetectionService:
         # Calculate drought score (0-100)
         score = 0
         
-        # NDVI contribution (40%)
-        if current_ndvi < 0.3:
-            score += 40
-        elif current_ndvi < 0.4:
-            score += 30
-        elif current_ndvi < 0.5:
-            score += 20
-        elif current_ndvi < 0.6:
-            score += 10
+        # NDVI contribution (40%) – skip when NDVI is unavailable
+        if current_ndvi is not None:
+            if current_ndvi < 0.3:
+                score += 40
+            elif current_ndvi < 0.4:
+                score += 30
+            elif current_ndvi < 0.5:
+                score += 20
+            elif current_ndvi < 0.6:
+                score += 10
         
         # Rainfall deficit contribution (30%)
         score += min(30, rainfall_deficit * 0.6)
         
-        # NDWI contribution (20%)
-        if current_ndwi < 0.1:
-            score += 20
-        elif current_ndwi < 0.2:
-            score += 15
-        elif current_ndwi < 0.3:
-            score += 10
+        # NDWI contribution (20%) – skip when NDWI is unavailable
+        if current_ndwi is not None:
+            if current_ndwi < 0.1:
+                score += 20
+            elif current_ndwi < 0.2:
+                score += 15
+            elif current_ndwi < 0.3:
+                score += 10
         
         # NDVI trend contribution (10%)
         if ndvi_trend < -0.05:
@@ -159,8 +161,8 @@ class StressDetectionService:
         return {
             'score': round(score, 1),
             'level': level,
-            'ndvi': round(current_ndvi, 3),
-            'ndwi': round(current_ndwi, 3),
+            'ndvi': round(current_ndvi, 3) if current_ndvi is not None else None,
+            'ndwi': round(current_ndwi, 3) if current_ndwi is not None else None,
             'rainfall_deficit_percent': round(rainfall_deficit, 1),
             'ndvi_trend': round(ndvi_trend, 4),
             'message': tech_msg,  # Default to technical
@@ -205,7 +207,7 @@ class StressDetectionService:
         
         # Get latest NDWI
         latest = veg_health[0]
-        current_ndwi = latest.ndwi or 0
+        current_ndwi = latest.ndwi   # Keep as None if not available
         
         # Calculate NDVI decline rate
         if len(veg_health) >= 2:
@@ -220,15 +222,16 @@ class StressDetectionService:
         # Calculate water stress score (0-100)
         score = 0
         
-        # NDWI contribution (60%)
-        if current_ndwi < 0.1:
-            score += 60
-        elif current_ndwi < 0.15:
-            score += 45
-        elif current_ndwi < 0.2:
-            score += 30
-        elif current_ndwi < 0.25:
-            score += 15
+        # NDWI contribution (60%) – skip when NDWI is unavailable
+        if current_ndwi is not None:
+            if current_ndwi < 0.1:
+                score += 60
+            elif current_ndwi < 0.15:
+                score += 45
+            elif current_ndwi < 0.2:
+                score += 30
+            elif current_ndwi < 0.25:
+                score += 15
         
         # NDVI decline rate contribution (40%)
         if ndvi_decline_rate < -0.05:
@@ -259,7 +262,7 @@ class StressDetectionService:
         return {
             'score': round(score, 1),
             'level': level,
-            'ndwi': round(current_ndwi, 3),
+            'ndwi': round(current_ndwi, 3) if current_ndwi is not None else None,
             'ndvi_decline_rate': round(ndvi_decline_rate, 4),
             'message': tech_msg,  # Default to technical
             'message_farmer': farmer_msg,
@@ -403,7 +406,7 @@ class StressDetectionService:
         
         # Get latest NDRE (sensitive to chlorophyll)
         latest = veg_health[0]
-        current_ndre = latest.ndre or 0
+        current_ndre = latest.ndre   # Keep as None if not available
         
         # Calculate NDVI growth rate
         if len(veg_health) >= 2:
@@ -418,17 +421,18 @@ class StressDetectionService:
         # Calculate nutrient deficiency score (0-100)
         score = 0
         
-        # NDRE contribution (50%) - low NDRE indicates chlorophyll deficiency
-        if current_ndre < 0.3:
-            score += 50
-        elif current_ndre < 0.35:
-            score += 40
-        elif current_ndre < 0.4:
-            score += 30
-        elif current_ndre < 0.45:
-            score += 20
-        elif current_ndre < 0.5:
-            score += 10
+        # NDRE contribution (50%) – skip when NDRE is unavailable
+        if current_ndre is not None:
+            if current_ndre < 0.3:
+                score += 50
+            elif current_ndre < 0.35:
+                score += 40
+            elif current_ndre < 0.4:
+                score += 30
+            elif current_ndre < 0.45:
+                score += 20
+            elif current_ndre < 0.5:
+                score += 10
         
         # NDVI growth rate contribution (50%) - negative or slow growth
         if ndvi_growth_rate < -0.01:
@@ -461,7 +465,7 @@ class StressDetectionService:
         return {
             'score': round(score, 1),
             'level': level,
-            'ndre': round(current_ndre, 3),
+            'ndre': round(current_ndre, 3) if current_ndre is not None else None,
             'ndvi_growth_rate': round(ndvi_growth_rate, 4),
             'message': tech_msg,  # Default to technical
             'message_farmer': farmer_msg,

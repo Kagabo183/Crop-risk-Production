@@ -95,6 +95,8 @@ export const autoFetchSatellite = (farmId) =>
 
 // ── Farm Satellite ──
 export const getFarmSatellite = () => api.get('/farm-satellite/')
+export const getFarmMetrics = (farmId, limit = 90) =>
+  api.get(`/farm-satellite/metrics/${farmId}`, { params: { limit } })
 export const seedSatelliteData = () => api.post('/seed-all')
 export const fetchRealData = (daysBack = 90, weatherDays = 7) =>
   api.post('/fetch-real-data', null, { params: { days_back: daysBack, weather_days: weatherDays }, timeout: 120000 })
@@ -153,6 +155,8 @@ export const getFarmPredictions = (farmId, limit = 10) =>
 // ── Early Warning ──
 export const getEarlyWarnings = () => api.get('/early-warning/')
 export const fetchWeatherAll = () => api.post('/early-warning/fetch-weather')
+export const getWeatherForecast = (lat, lon, days = 7) =>
+  api.get('/weather/forecast', { params: { lat, lon, days } })
 
 // ── Advisory ──
 export const getDailyAdvisory = (farmId, includeRisk = true) =>
@@ -178,8 +182,8 @@ export const getHealth = () => api.get('/health')
 // ── Geo Intelligence ──
 export const getGeoTimeline = (farmId, daysBack = 90) =>
   api.get(`/geo/farms/${farmId}/timeline`, { params: { days_back: daysBack } })
-export const getGeoNdviTiles = (farmId, daysBack = 30) =>
-  api.get(`/geo/farms/${farmId}/ndvi-tiles`, { params: { days_back: daysBack } })
+export const getGeoNdviTiles = (farmId, daysBack = 30, index = 'NDVI') =>
+  api.get(`/geo/farms/${farmId}/ndvi-tiles`, { params: { days_back: daysBack, index } })
 export const getGeoZones = (farmId) =>
   api.get(`/geo/farms/${farmId}/zones`)
 export const computeGeoZones = (farmId, nZones = 3, daysBack = 90) =>
@@ -207,6 +211,24 @@ export const getGeoNdviTileHistory = (farmId, limit = 12) =>
   api.get(`/geo/farms/${farmId}/ndvi-tile-history`, { params: { limit } })
 export const getGeoFusionStatus    = (farmId, daysBack = 30) =>
   api.get(`/geo/farms/${farmId}/fusion-status`, { params: { days_back: daysBack } })
+export const getDetectedFields     = (bbox, zoom = 12) =>
+  api.get('/geo/detect-fields', { params: { bbox, zoom } })
+
+// ── User-drawn field boundaries ───────────────────────────────────────────────
+export const listUserFields        = (farmId, archived = false) =>
+  api.get('/geo/fields', { params: { farm_id: farmId, archived } })
+export const createUserField       = (data)           => api.post('/geo/fields', data)
+export const getUserField          = (fieldId)        => api.get(`/geo/fields/${fieldId}`)
+export const updateUserField       = (fieldId, data)  => api.put(`/geo/fields/${fieldId}`, data)
+export const deleteUserField       = (fieldId)        => api.delete(`/geo/fields/${fieldId}`)
+export const promoteDetectedField  = (detectedId, data = {}) =>
+  api.post(`/geo/detected-fields/${detectedId}/promote`, data)
+
+// ── Field crop classification ─────────────────────────────────────────────────
+export const classifyUserField     = (fieldId)  => api.post(`/geo/fields/${fieldId}/classify`)
+export const getFieldClassification= (fieldId)  => api.get(`/geo/fields/${fieldId}/classification`)
+export const classifyAllUserFields = (farmId)   =>
+  api.post('/geo/fields/classify-all', null, { params: farmId ? { farm_id: farmId } : {} })
 
 // ── Precision Agriculture ─────────────────────────────────────────────────────
 export const getSeasonsForFarm    = (farmId)           => api.get(`/precision-ag/farms/${farmId}/seasons`)

@@ -1,876 +1,636 @@
-/**
- * SatelliteDashboard
- * ------------------
- * Precision agriculture satellite intelligence hub.
- *
- * Left panel : farm selector, live health badges, layer toggles,
- *              productivity zone legend, scouting form, NDVI timeline chart.
- * Right panel: full-height Leaflet map (vanilla L via CDN, consistent with
- *              other map components in this app) with:
- *                - OSM base tiles
- *                - Farm boundary (GeoJSON)
- *                - NDVI tile overlay (GEE signed URL or color fallback)
- *                - Productivity zone polygons
- *                - Stress hotspot circles
- *                - Scouting observation markers
- */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  Map, Layers, Activity, Camera, Crosshair,
-  RefreshCw, ChevronDown, AlertTriangle, Eye, EyeOff,
-  Plus, Trash2, CheckCircle,
+  Activity,
+  BarChart2,
+  ChevronLeft,
+  ChevronRight,
+  CloudRain,
+  Filter,
+  Leaf,
+  Layers,
+  Map as MapIcon,
+  MapPin,
+  Plus,
+  Satellite,
+  Search,
 } from 'lucide-react'
-import VegetationTimeline from '../components/VegetationTimeline'
+import MapboxFieldMap from '../components/MapboxFieldMap'
+import FieldIntelligencePanel from '../components/FieldIntelligencePanel'
 import {
-  getFarms, getGeoNdviTiles, getGeoZones, computeGeoZones,
-  getGeoHotspots, getGeoScouting, createScoutingObservation,
-  deleteScoutingObservation, getGeoCropClassification,
-  getGeoPhenology, getGeoNdviTileHistory, getGeoFusionStatus,
+  autoFetchSatellite,
+  createFarm,
+  getFarmMetrics,
+  getFarmSatellite,
+  getFarms,
+  getGeoNdviTiles,
+  getNdviHistory,
+  saveFarmBoundary,
+  getTaskStatus,
+  getWeatherForecast,
+  updateFarm,
 } from '../api'
+import { formatDate } from '../utils/formatDate'
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+const NDVI_BANDS = [
+  { label: '<0.2', color: '#d92d20' },
+  { label: '0.2-0.3', color: '#f97316' },
+  { label: '0.3-0.4', color: '#fbbf24' },
+  { label: '0.4-0.6', color: '#a3e635' },
+  { label: '>0.6', color: '#166534' },
+]
 
-const ZONE_COLORS  = { high: '#4CAF50', medium: '#FFC107', low: '#F44336' }
-const SEV_COLORS   = { low: '#8BC34A', medium: '#FFC107', high: '#FF5722', critical: '#D32F2F' }
-const OBSERVATION_TYPES = ['pest', 'disease', 'nutrient_deficiency', 'irrigation_issue', 'soil_issue', 'other']
+const RAIL_ITEMS = [
+  { icon: MapIcon, label: 'Map cockpit' },
+  { icon: Layers, label: 'Layers' },
+  { icon: Leaf, label: 'Vegetation' },
+  { icon: CloudRain, label: 'Weather' },
+  { icon: Satellite, label: 'Satellite tasks' },
+  { icon: BarChart2, label: 'Analytics' },
+]
 
-const ndviGradient = (v) => {
-  if (v === null || v === undefined) return '#94a3b8'
-  if (v < 0.2) return '#F44336'
-  if (v < 0.35) return '#FF5722'
-  if (v < 0.5) return '#FFC107'
-  if (v < 0.65) return '#CDDC39'
-  if (v < 0.8) return '#8BC34A'
-  return '#4CAF50'
+const ndviColor = (v) => {
+  if (v == null) return '#cbd5e1'
+  if (v < 0.2) return '#d92d20'
+  if (v < 0.3) return '#f97316'
+  if (v < 0.4) return '#fbbf24'
+  if (v < 0.5) return '#a3e635'
+  return '#166534'
 }
 
-const fmt = (n, d = 3) => (n !== null && n !== undefined ? Number(n).toFixed(d) : '—')
+const getFieldStatus = (ndvi) => {
+  if (ndvi == null) return { label: 'Awaiting scan', tone: 'pending' }
+  if (ndvi < 0.2) return { label: 'Critical', tone: 'critical' }
+  if (ndvi < 0.35) return { label: 'Stressed', tone: 'warning' }
+  if (ndvi < 0.55) return { label: 'Stable', tone: 'stable' }
+  return { label: 'Thriving', tone: 'healthy' }
+}
 
-// ─── component ───────────────────────────────────────────────────────────────
+const formatArea = (area) => `${Number(area || 0).toFixed(1)} ha`
 
 export default function SatelliteDashboard() {
-  // ── farm list ──
-  const [farms, setFarms]           = useState([])
-  const [selectedId, setSelectedId] = useState(null)
+  const [farms, setFarms] = useState([])
+  const [satellite, setSatellite] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  // ── layer data ──
-  const [ndviInfo, setNdviInfo]         = useState(null)
-  const [zones, setZones]               = useState([])
-  const [hotspots, setHotspots]         = useState([])
-  const [scoutingObs, setScoutingObs]   = useState([])
-  const [cropClass, setCropClass]       = useState(null)
-  const [phenology, setPhenology]           = useState(null)
-  const [tileHistory, setTileHistory]       = useState([])
-  const [tileHistoryIdx, setTileHistoryIdx] = useState(0)
-  const [fusionStatus, setFusionStatus]     = useState(null)
+  const [selectedFarmId, setSelectedFarmId] = useState(null)
+  const [fieldHistory, setFieldHistory] = useState([])
+  const [weatherSummary, setWeatherSummary] = useState(null)
+  const [intelLoading, setIntelLoading] = useState(false)
 
-  // ── layer visibility toggles ──
-  const [showNdvi,     setShowNdvi]     = useState(true)
-  const [showZones,    setShowZones]    = useState(true)
-  const [showHotspots, setShowHotspots] = useState(true)
-  const [showScouting, setShowScouting] = useState(true)
+  const [search, setSearch] = useState('')
+  const [seasonFilter, setSeasonFilter] = useState('all')
+  const [sortMode, setSortMode] = useState('latest')
+  const [layerMetric, setLayerMetric] = useState('ndvi')
+  const [overlayVisible, setOverlayVisible] = useState(true)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('intelligentSidebarCollapsed') === 'true'
+  })
 
-  // ── ui state ──
-  const [loading,    setLoading]    = useState(false)
-  const [recomputing, setRecomputing] = useState(false)
-  const [scoutForm,  setScoutForm]  = useState(false)
-  const [scoutPending, setScoutPending] = useState({ lat: null, lon: null })
-  const [scoutData,  setScoutData]  = useState({ type: 'pest', severity: 'medium', notes: '', tags: '' })
-  const [scoutSaving, setScoutSaving] = useState(false)
-  const [showTimeline, setShowTimeline] = useState(false)
+  const [draftGeometry, setDraftGeometry] = useState(null)
+  const [draftArea, setDraftArea] = useState(null)
+  const [draftName, setDraftName] = useState('New field')
+  const [draftCrop, setDraftCrop] = useState('')
+  const [savingDraft, setSavingDraft] = useState(false)
+  const [draftError, setDraftError] = useState(null)
+  const [tileSource, setTileSource] = useState(null)
+  const [tileError, setTileError] = useState(null)
 
-  // ── map refs ──
-  const mapRef         = useRef(null)        // DOM container
-  const mapInstance    = useRef(null)        // L.Map
-  const farmLayer      = useRef(null)        // GeoJSON farm boundary
-  const ndviLayer      = useRef(null)        // TileLayer or GeoJSON NDVI overlay
-  const zoneLayer      = useRef(null)        // GeoJSON zones
-  const hotLayer       = useRef(null)        // FeatureGroup hotspot circles
-  const scoutLayer     = useRef(null)        // LayerGroup scouting markers
-  const clickListener  = useRef(null)        // map click handler for scouting
+  const fileInputRef = useRef(null)
 
-  const selectedFarm = farms.find(f => f.id === selectedId) || null
+  const [satProgress, setSatProgress] = useState({})
+  const pollTimers = useRef({})
 
-  // ── initialise Leaflet map ──────────────────────────────────────────────────
-  useEffect(() => {
-    if (mapInstance.current || !mapRef.current || !window.L) return
-    const L = window.L
-    const map = L.map(mapRef.current, {
-      center: [-1.95, 30.06],
-      zoom: 8,
-      zoomControl: true,
-    })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
-    }).addTo(map)
-    mapInstance.current = map
-    return () => {
-      map.remove()
-      mapInstance.current = null
-    }
-  }, [])
-
-  // ── load farm list ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    getFarms()
-      .then(res => {
-        const list = Array.isArray(res.data) ? res.data : res.data.farms || []
-        setFarms(list)
-        if (list.length) setSelectedId(list[0].id)
+  const loadData = useCallback(() => {
+    setLoading(true)
+    Promise.allSettled([getFarms(), getFarmSatellite()])
+      .then(([fRes, sRes]) => {
+        if (fRes.status === 'fulfilled') setFarms(fRes.value.data)
+        if (sRes.status === 'fulfilled') setSatellite(sRes.value.data)
       })
-      .catch(console.error)
+      .finally(() => setLoading(false))
   }, [])
 
-  // ── draw farm boundary ──────────────────────────────────────────────────────
-  const drawFarmBoundary = useCallback((farm) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L) return
+  useEffect(() => { loadData() }, [loadData])
 
-    if (farmLayer.current) { map.removeLayer(farmLayer.current); farmLayer.current = null }
-
-    const geo = farm?.boundary_geojson || farm?.boundary
-    if (!geo) return
-
-    const layer = L.geoJSON(typeof geo === 'string' ? JSON.parse(geo) : geo, {
-      style: { color: '#2196F3', weight: 2.5, fillOpacity: 0.08, fillColor: '#2196F3' },
-    }).addTo(map)
-    farmLayer.current = layer
-
-    try { map.fitBounds(layer.getBounds(), { padding: [40, 40] }) }
-    catch (_) {}
+  useEffect(() => () => {
+    Object.values(pollTimers.current).forEach(clearInterval)
   }, [])
 
-  // ── apply historical NDVI tile (time slider) ─────────────────────────────────
-  const applyHistoricalTile = useCallback((tile) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L || !tile?.tile_url) return
-    if (ndviLayer.current) { map.removeLayer(ndviLayer.current); ndviLayer.current = null }
-    ndviLayer.current = L.tileLayer(tile.tile_url, {
-      opacity: 0.75,
-      attribution: '© Google Earth Engine',
-      maxZoom: 17,
-    }).addTo(map)
-  }, [])
-
-  // ── draw NDVI overlay ───────────────────────────────────────────────────────
-  const drawNdvi = useCallback((info, farm) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L || !showNdvi) return
-
-    if (ndviLayer.current) { map.removeLayer(ndviLayer.current); ndviLayer.current = null }
-    if (!info) return
-
-    if (info.tile_url) {
-      // GEE signed XYZ tile layer
-      ndviLayer.current = L.tileLayer(info.tile_url, {
-        opacity: 0.75,
-        attribution: '© Google Earth Engine',
-        maxZoom: 17,
-      }).addTo(map)
-    } else if (info.color_hex) {
-      // Fallback: colour the farm polygon by latest NDVI value
-      const geo = farm?.boundary_geojson || farm?.boundary
-      if (!geo) return
-      ndviLayer.current = L.geoJSON(typeof geo === 'string' ? JSON.parse(geo) : geo, {
-        style: {
-          color: info.color_hex, weight: 0,
-          fillColor: info.color_hex, fillOpacity: 0.55,
-        },
-      }).addTo(map)
-    }
-  }, [showNdvi])
-
-  // ── draw productivity zones ─────────────────────────────────────────────────
-  const drawZones = useCallback((zoneList) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L) return
-
-    if (zoneLayer.current) { map.removeLayer(zoneLayer.current); zoneLayer.current = null }
-    if (!showZones || !zoneList.length) return
-
-    const features = zoneList
-      .filter(z => z.boundary)
-      .map(z => ({
-        type: 'Feature',
-        geometry: typeof z.boundary === 'string' ? JSON.parse(z.boundary) : z.boundary,
-        properties: { zone_class: z.zone_class, mean_ndvi: z.mean_ndvi, area_ha: z.area_ha, color: ZONE_COLORS[z.zone_class] || '#888' },
-      }))
-
-    if (!features.length) return
-
-    zoneLayer.current = L.geoJSON({ type: 'FeatureCollection', features }, {
-      style: f => ({
-        color: f.properties.color,
-        weight: 1.5,
-        fillColor: f.properties.color,
-        fillOpacity: 0.35,
-      }),
-      onEachFeature: (f, layer) => {
-        layer.bindPopup(
-          `<b>${capitalize(f.properties.zone_class)} Productivity</b><br>` +
-          `NDVI: ${fmt(f.properties.mean_ndvi)}<br>` +
-          `Area: ${fmt(f.properties.area_ha, 2)} ha`
-        )
-      },
-    }).addTo(map)
-  }, [showZones])
-
-  // ── draw hotspots ─────────────────────────────────────────────────────────
-  const drawHotspots = useCallback((spots) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L) return
-
-    if (hotLayer.current) { map.removeLayer(hotLayer.current); hotLayer.current = null }
-    if (!showHotspots || !spots.length) return
-
-    hotLayer.current = L.featureGroup().addTo(map)
-    spots.forEach(s => {
-      if (s.lat == null || s.lon == null) return
-      const severity = s.severity || 'medium'
-      L.circleMarker([s.lat, s.lon], {
-        radius: 8 + (s.anomaly_magnitude || 0) * 20,
-        color: SEV_COLORS[severity] || '#FF5722',
-        weight: 2,
-        fillColor: SEV_COLORS[severity] || '#FF5722',
-        fillOpacity: 0.5,
-      })
-        .bindPopup(
-          `<b>⚡ Stress Hotspot</b><br>` +
-          `NDVI delta: ${fmt(s.ndvi_delta, 3)}<br>` +
-          `Severity: ${severity}`
-        )
-        .addTo(hotLayer.current)
-    })
-  }, [showHotspots])
-
-  // ── draw scouting markers ───────────────────────────────────────────────────
-  const drawScouting = useCallback((obsList) => {
-    const L = window.L
-    const map = mapInstance.current
-    if (!map || !L) return
-
-    if (scoutLayer.current) { map.removeLayer(scoutLayer.current); scoutLayer.current = null }
-    if (!showScouting || !obsList.length) return
-
-    scoutLayer.current = L.layerGroup().addTo(map)
-    obsList.forEach(obs => {
-      if (obs.latitude == null || obs.longitude == null) return
-      const color = SEV_COLORS[obs.severity] || '#607D8B'
-      const icon = L.divIcon({
-        html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);"></div>`,
-        className: '',
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
-      })
-      L.marker([obs.latitude, obs.longitude], { icon })
-        .bindPopup(
-          `<b>${obs.observation_type?.replace(/_/g, ' ')}</b><br>` +
-          `Severity: ${obs.severity || '—'}<br>` +
-          `${obs.notes ? `<i>${obs.notes.slice(0, 120)}</i>` : ''}`
-        )
-        .addTo(scoutLayer.current)
-    })
-  }, [showScouting])
-
-  // ── map click → place scouting pin ─────────────────────────────────────────
-  const enableScoutingClick = useCallback(() => {
-    const map = mapInstance.current
-    if (!map) return
-    disableScoutingClick()
-    const handler = (e) => {
-      setScoutPending({ lat: e.latlng.lat, lon: e.latlng.lng })
-      setScoutForm(true)
-      disableScoutingClick()
-    }
-    map.once('click', handler)
-    clickListener.current = handler
-    map.getContainer().style.cursor = 'crosshair'
-  }, [])
-
-  const disableScoutingClick = useCallback(() => {
-    const map = mapInstance.current
-    if (!map) return
-    if (clickListener.current) {
-      map.off('click', clickListener.current)
-      clickListener.current = null
-    }
-    map.getContainer().style.cursor = ''
-  }, [])
-
-  // ── load all data for selected farm ────────────────────────────────────────
   useEffect(() => {
-    if (!selectedId) return
-    const farm = farms.find(f => f.id === selectedId)
+    if (typeof window === 'undefined') return
+    localStorage.setItem('intelligentSidebarCollapsed', sidebarCollapsed ? 'true' : 'false')
+  }, [sidebarCollapsed])
+
+  const fieldsWithBoundary = useMemo(() => (
+    farms
+      .map(f => {
+        const sat = satellite.find(s => s.id === f.id) || {}
+        return {
+          ...f,
+          ndvi: sat.ndvi ?? sat.ndvi_mean ?? null,
+          ndre: sat.ndre ?? sat.ndre_mean ?? null,
+          evi: sat.evi ?? sat.evi_mean ?? null,
+          savi: sat.savi ?? sat.savi_mean ?? null,
+          last_satellite_date: sat.ndvi_date || f.last_satellite_date,
+        }
+      })
+      .filter(f => f.boundary_geojson)
+  ), [farms, satellite])
+
+  const seasons = useMemo(() => {
+    const unique = Array.from(new Set(farms.map(f => f.season).filter(Boolean)))
+    return ['all', ...unique]
+  }, [farms])
+
+  const filteredFields = useMemo(() => fieldsWithBoundary.filter(f => {
+    const matchesSeason = seasonFilter === 'all' || f.season === seasonFilter
+    const matchesSearch = !search.trim() || (f.name || '').toLowerCase().includes(search.toLowerCase())
+    return matchesSeason && matchesSearch
+  }), [fieldsWithBoundary, seasonFilter, search])
+
+  const sortedFields = useMemo(() => {
+    const arr = [...filteredFields]
+    switch (sortMode) {
+      case 'name':
+        return arr.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      case 'health':
+        return arr.sort((a, b) => (b.ndvi ?? -1) - (a.ndvi ?? -1))
+      default:
+        return arr.sort((a, b) => new Date(b.last_satellite_date || 0) - new Date(a.last_satellite_date || 0))
+    }
+  }, [filteredFields, sortMode])
+
+  useEffect(() => {
+    if (!selectedFarmId && sortedFields.length) {
+      setSelectedFarmId(sortedFields[0].id)
+    }
+  }, [selectedFarmId, sortedFields])
+
+  const selectedFarm = useMemo(() => {
+    const base = farms.find(f => f.id === selectedFarmId)
+    if (!base) return null
+    const sat = satellite.find(s => s.id === selectedFarmId) || {}
+    return { ...base, ...sat }
+  }, [farms, satellite, selectedFarmId])
+
+  useEffect(() => {
+    if (!selectedFarmId) {
+      setFieldHistory([])
+      setWeatherSummary(null)
+      return
+    }
+    const farm = farms.find(f => f.id === selectedFarmId)
     if (!farm) return
 
-    drawFarmBoundary(farm)
-    setLoading(true)
-    setNdviInfo(null); setZones([]); setHotspots([]); setScoutingObs([]); setCropClass(null)
-    setPhenology(null); setTileHistory([]); setTileHistoryIdx(0); setFusionStatus(null)
-
+    setIntelLoading(true)
     Promise.allSettled([
-      getGeoNdviTiles(selectedId),
-      getGeoZones(selectedId),
-      getGeoHotspots(selectedId),
-      getGeoScouting(selectedId),
-      getGeoCropClassification(selectedId),
-      getGeoPhenology(selectedId),
-      getGeoNdviTileHistory(selectedId, 12),
-      getGeoFusionStatus(selectedId),
-    ]).then(([ndvi, z, h, s, cc, pheno, hist, fusion]) => {
-      const ndviData   = ndvi.status   === 'fulfilled' ? ndvi.value.data   : null
-      const zonesData  = z.status      === 'fulfilled' ? (z.value.data.zones || [])        : []
-      const hotData    = h.status      === 'fulfilled' ? (h.value.data.hotspots || [])     : []
-      const scData     = s.status      === 'fulfilled' ? (s.value.data.observations || []) : []
-      const ccData     = cc.status     === 'fulfilled' ? cc.value.data     : null
-      const phenoData  = pheno.status  === 'fulfilled' ? pheno.value.data  : null
-      const histData   = hist.status   === 'fulfilled' ? (hist.value.data.tiles || [])     : []
-      const fusionData = fusion.status === 'fulfilled' ? fusion.value.data : null
+      getFarmMetrics(selectedFarmId, 120),
+      getNdviHistory(selectedFarmId, 120),
+      farm.latitude && farm.longitude
+        ? getWeatherForecast(farm.latitude, farm.longitude, 3)
+        : Promise.resolve({ data: null }),
+    ]).then(([metricsRes, historyRes, weatherRes]) => {
+      const metricRows = metricsRes.status === 'fulfilled' ? (metricsRes.value.data?.observations || []) : []
+      const historyRows = historyRes.status === 'fulfilled' ? (historyRes.value.data || []) : []
 
-      setNdviInfo(ndviData)
-      setZones(zonesData)
-      setHotspots(hotData)
-      setScoutingObs(scData)
-      setCropClass(ccData)
-      setPhenology(phenoData)
-      setTileHistory(histData)
-      setTileHistoryIdx(0)
-      setFusionStatus(fusionData)
+      const normalize = (rows) => rows.map(r => ({
+        date: r.date,
+        ndvi: r.ndvi_mean ?? r.ndvi ?? null,
+        ndre: r.ndre_mean ?? r.ndre ?? null,
+        evi: r.evi_mean ?? r.evi ?? null,
+        savi: r.savi_mean ?? r.savi ?? null,
+        cloud_cover: r.cloud_cover_percent ?? r.cloud_cover,
+        health_score: r.health_score,
+        ndvi_min: r.ndvi_min,
+        ndvi_max: r.ndvi_max,
+        ndvi_std: r.ndvi_std,
+      }))
 
-      drawNdvi(ndviData, farm)
-      drawZones(zonesData)
-      drawHotspots(hotData)
-      drawScouting(scData)
-    }).finally(() => setLoading(false))
-  }, [selectedId, farms, drawFarmBoundary, drawNdvi, drawZones, drawHotspots, drawScouting])
+      const normalizedMetrics = normalize(metricRows)
+      const normalizedHistory = normalize(historyRows)
+      setFieldHistory(normalizedMetrics.length ? normalizedMetrics : normalizedHistory)
+      setWeatherSummary(weatherRes.status === 'fulfilled' ? weatherRes.value.data : null)
+    }).finally(() => setIntelLoading(false))
+  }, [selectedFarmId, farms])
 
-  // ── time slider: swap NDVI tile when index changes ───────────────────────────
+  // Fetch raster tiles for the active layer
   useEffect(() => {
-    if (!tileHistory.length) return
-    const tile = tileHistory[tileHistoryIdx]
-    if (tile?.tile_url) {
-      applyHistoricalTile(tile)
-    } else if (tileHistoryIdx === 0) {
-      // restore live tile when snapping back to latest
-      drawNdvi(ndviInfo, selectedFarm)
+    if (!selectedFarmId) {
+      setTileSource(null)
+      return
     }
-  }, [tileHistoryIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+    setTileError(null)
+    getGeoNdviTiles(selectedFarmId, 45, layerMetric.toUpperCase())
+      .then((res) => {
+        const data = res.data || {}
+        const tiles = data.tiles || (data.tile_url ? [data.tile_url] : data.urls) || data
+        if (tiles && tiles.length) {
+          setTileSource({ tiles, minzoom: data.minzoom, maxzoom: data.maxzoom, tileSize: data.tile_size })
+        } else {
+          setTileSource(null)
+        }
+      })
+      .catch(() => {
+        setTileError('Live tiles unavailable for this field/index')
+        setTileSource(null)
+      })
+  }, [selectedFarmId, layerMetric])
 
-  // ── re-draw when toggles change ─────────────────────────────────────────────
-  useEffect(() => { drawNdvi(ndviInfo, selectedFarm) }, [showNdvi, ndviInfo, selectedFarm, drawNdvi])
-  useEffect(() => { drawZones(zones)    }, [showZones, zones, drawZones])
-  useEffect(() => { drawHotspots(hotspots) }, [showHotspots, hotspots, drawHotspots])
-  useEffect(() => { drawScouting(scoutingObs) }, [showScouting, scoutingObs, drawScouting])
+  const pollTaskProgress = useCallback((farmId, taskId) => {
+    if (!farmId || !taskId) return
 
-  // ── recompute zones ─────────────────────────────────────────────────────────
-  const handleRecomputeZones = async () => {
-    if (!selectedId) return
-    setRecomputing(true)
-    try {
-      const res = await computeGeoZones(selectedId)
-      const zonesData = res.data.zones || []
-      setZones(zonesData)
-      drawZones(zonesData)
-    } catch (e) {
-      console.error('recompute zones failed', e)
-    } finally {
-      setRecomputing(false)
+    // Avoid multiple pollers for the same farm.
+    if (pollTimers.current[farmId]) {
+      clearInterval(pollTimers.current[farmId])
+      delete pollTimers.current[farmId]
     }
-  }
 
-  // ── save scouting observation ───────────────────────────────────────────────
-  const handleSaveObservation = async () => {
-    if (!selectedId || scoutPending.lat == null) return
-    setScoutSaving(true)
-    try {
-      const payload = {
-        ...scoutData,
-        latitude: scoutPending.lat,
-        longitude: scoutPending.lon,
-        tags: scoutData.tags ? scoutData.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+    const poll = async () => {
+      try {
+        const res = await getTaskStatus(taskId)
+        const data = res.data || {}
+        const state = data.state || data.status
+        const percent = Number(data.percent ?? data.progress ?? 0)
+        const stage = data.stage || data.message || String(state || 'Processing…')
+
+        setSatProgress(prev => ({ ...prev, [farmId]: { percent, stage, taskId } }))
+
+        if (state === 'SUCCESS' || state === 'FAILURE' || percent >= 100) {
+          clearInterval(pollTimers.current[farmId])
+          delete pollTimers.current[farmId]
+          if (state === 'SUCCESS' || percent >= 100) {
+            loadData()
+            setTimeout(() => setSatProgress(prev => {
+              const next = { ...prev }
+              delete next[farmId]
+              return next
+            }), 2000)
+          } else {
+            setSatProgress(prev => ({ ...prev, [farmId]: { percent: 0, stage: 'Failed' } }))
+          }
+        }
+      } catch {
+        /* keep polling */
       }
-      const res = await createScoutingObservation(selectedId, payload)
-      const updated = [...scoutingObs, res.data]
-      setScoutingObs(updated)
-      drawScouting(updated)
-      setScoutForm(false)
-      setScoutPending({ lat: null, lon: null })
-      setScoutData({ type: 'pest', severity: 'medium', notes: '', tags: '' })
-    } catch (e) {
-      console.error('failed to save observation', e)
+    }
+
+    pollTimers.current[farmId] = setInterval(poll, 1500)
+    poll()
+  }, [loadData])
+
+  const handleFetchSatellite = useCallback(async (farmId) => {
+    if (!farmId) return
+    setSatProgress(prev => ({ ...prev, [farmId]: { percent: 5, stage: 'Starting…' } }))
+    try {
+      const res = await autoFetchSatellite(farmId)
+      pollTaskProgress(farmId, res.data.task_id)
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to trigger satellite analysis')
+      setSatProgress(prev => {
+        const next = { ...prev }
+        delete next[farmId]
+        return next
+      })
+    }
+  }, [pollTaskProgress])
+
+  const handleBoundaryChange = (geometry, area) => {
+    setDraftGeometry(geometry)
+    if (area) setDraftArea(area)
+  }
+
+  const resetDraft = () => {
+    setDraftGeometry(null)
+    setDraftArea(null)
+    setDraftName('New field')
+    setDraftCrop('')
+    setDraftError(null)
+  }
+
+  const handleCreateNewFarm = () => {
+    setSelectedFarmId(null)
+    setDraftGeometry(null)
+    setDraftArea(null)
+    setDraftName('New Field')
+    setDraftCrop('')
+    setDraftError(null)
+    // Close sidebar on mobile if needed
+    if (window.innerWidth < 1200) setSidebarCollapsed(true)
+  }
+
+  const handleSaveField = async () => {
+    if (!draftGeometry) {
+      setDraftError('Draw a polygon or upload GeoJSON first')
+      return
+    }
+    setDraftError(null)
+    setSavingDraft(true)
+    try {
+      const targetFarmId = selectedFarmId && selectedFarm ? selectedFarmId : null
+
+      if (targetFarmId) {
+        if (draftArea) {
+          await updateFarm(targetFarmId, { size_hectares: draftArea })
+        }
+        await saveFarmBoundary(targetFarmId, draftGeometry)
+        await handleFetchSatellite(targetFarmId)
+        loadData()
+        setSelectedFarmId(targetFarmId)
+      } else {
+        const payload = {
+          name: draftName || 'New field',
+          crop_type: draftCrop || undefined,
+          size_hectares: draftArea || undefined,
+        }
+        const res = await createFarm(payload)
+        const farmId = res.data?.id
+        if (farmId) {
+          await saveFarmBoundary(farmId, draftGeometry)
+          await handleFetchSatellite(farmId)
+          loadData()
+          setSelectedFarmId(farmId)
+        }
+      }
+      resetDraft()
+    } catch (err) {
+      setDraftError(err.response?.data?.detail || 'Failed to save field')
     } finally {
-      setScoutSaving(false)
+      setSavingDraft(false)
     }
   }
 
-  // ── delete scouting observation ─────────────────────────────────────────────
-  const handleDeleteObs = async (obsId) => {
+  const parseGeoJsonText = (text) => {
     try {
-      await deleteScoutingObservation(obsId)
-      const updated = scoutingObs.filter(o => o.id !== obsId)
-      setScoutingObs(updated)
-      drawScouting(updated)
-    } catch (e) { console.error('delete obs failed', e) }
+      const geo = JSON.parse(text)
+      if (geo.type === 'FeatureCollection') return geo.features?.[0]?.geometry
+      if (geo.type === 'Feature') return geo.geometry
+      if (geo.type === 'Polygon' || geo.type === 'MultiPolygon') return geo
+    } catch {}
+    return null
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  const handleFileUpload = async (file) => {
+    setDraftError(null)
+    if (!file) return
+    const name = file.name.toLowerCase()
+
+    if (name.endsWith('.geojson') || name.endsWith('.json')) {
+      const text = await file.text()
+      const geometry = parseGeoJsonText(text)
+      if (!geometry) throw new Error('Invalid GeoJSON file')
+      setDraftGeometry(geometry)
+      return
+    }
+
+    throw new Error('Unsupported file type. Use GeoJSON (.geojson/.json).')
+  }
+
+  const onUploadChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      await handleFileUpload(file)
+    } catch (err) {
+      setDraftError(err.message)
+    }
+  }
+
+  const toggleSidebar = () => setSidebarCollapsed((prev) => !prev)
+
+  if (loading) {
+    return (
+      <div className="loading">
+        <div className="spinner" />
+        <p>Loading satellite map…</p>
+      </div>
+    )
+  }
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 64px)', overflow: 'hidden', background: 'var(--bg-body)' }}>
-
-      {/* ── LEFT CONTROL PANEL ─────────────────────────────────────────────── */}
-      <aside style={{
-        width: 320, flexShrink: 0, overflowY: 'auto', overflowX: 'hidden',
-        borderRight: '1px solid var(--border)', padding: '16px',
-        display: 'flex', flexDirection: 'column', gap: 16,
-        background: 'var(--bg-card)',
-      }}>
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Map size={20} color="var(--primary)" />
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
-            Satellite Intelligence
-          </h2>
+    <div className={`intelligent-map${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      <div className="intelligent-map__rail">
+        <div className="rail-brand">CR</div>
+        <div className="rail-icons">
+          {RAIL_ITEMS.map((item, idx) => (
+            <button key={item.label} className={`rail-icon${idx === 0 ? ' active' : ''}`} title={item.label} aria-label={item.label}>
+              <item.icon size={18} />
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* Farm selector */}
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-            Farm
-          </label>
-          <div style={{ position: 'relative', marginTop: 4 }}>
-            <select
-              value={selectedId || ''}
-              onChange={e => setSelectedId(Number(e.target.value))}
-              style={{
-                width: '100%', padding: '8px 32px 8px 10px', borderRadius: 8,
-                border: '1px solid var(--border)', background: 'var(--bg-body)',
-                color: 'var(--text-primary)', fontSize: 13, appearance: 'none', cursor: 'pointer',
-              }}
+      <aside className={`field-sidebar intelligent-sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
+        <button className="field-sidebar__collapse" onClick={toggleSidebar} aria-label="Toggle field drawer">
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+        </button>
+
+        {sidebarCollapsed ? (
+          <div className="field-sidebar__collapsed-content">
+            <span>Fields</span>
+            <button
+              onClick={handleCreateNewFarm}
+              className="collapsed-add"
+              title="Add field"
+              style={{ border: 'none', cursor: 'pointer' }}
             >
-              {farms.map(f => (
-                <option key={f.id} value={f.id}>{f.name || `Farm #${f.id}`}</option>
-              ))}
-            </select>
-            <ChevronDown size={14} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }} />
+              <Plus size={16} />
+            </button>
           </div>
-        </div>
-
-        {/* NDVI + crop type badges */}
-        {ndviInfo && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <InfoBadge
-              label="Mean NDVI"
-              value={fmt(ndviInfo.mean_ndvi)}
-              color={ndviGradient(ndviInfo.mean_ndvi)}
-            />
-            <InfoBadge
-              label="Source"
-              value={ndviInfo.source || '—'}
-              color="var(--primary)"
-            />
-            {cropClass && (
-              <InfoBadge
-                label="Crop Type"
-                value={cropClass.crop_type || '—'}
-                color="#9C27B0"
-                span={2}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Phenology / growth stage card */}
-        {phenology && !loading && (
-          <PhenologyCard phenology={phenology} />
-        )}
-
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-            <span className="spinner" style={{ width: 14, height: 14 }} />
-            Loading satellite data…
-          </div>
-        )}
-
-        {/* Layer toggles */}
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>
-            <Layers size={11} style={{ marginRight: 4 }} />Layers
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <LayerToggle active={showNdvi}     onChange={setShowNdvi}     color="#4CAF50" label="NDVI Overlay" />
-            <LayerToggle active={showZones}    onChange={setShowZones}    color="#FFC107" label="Productivity Zones" />
-            <LayerToggle active={showHotspots} onChange={setShowHotspots} color="#FF5722" label="Stress Hotspots" />
-            <LayerToggle active={showScouting} onChange={setShowScouting} color="#2196F3" label="Field Scouting" />
-          </div>
-        </div>
-
-        {/* Satellite fusion coverage status */}
-        {fusionStatus && !loading && (
-          <FusionStatusRow status={fusionStatus} />
-        )}
-
-        {/* Productivity zones legend + recompute */}
-        {zones.length > 0 && showZones && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>
-              Zone Breakdown
+        ) : (
+          <>
+            <div className="field-sidebar__header">
+              <div>
+                <div className="eyebrow">Season</div>
+                <select value={seasonFilter} onChange={(e) => setSeasonFilter(e.target.value)} className="field-sidebar__select">
+                  {seasons.map(season => (
+                    <option key={season} value={season}>{season === 'all' ? 'All seasons' : season}</option>
+                  ))}
+                </select>
+              </div>
+              <Link className="btn btn-secondary" to="/farms">
+                Manage
+              </Link>
             </div>
-            {['high', 'medium', 'low'].map(cls => {
-              const z = zones.filter(z => z.zone_class === cls)
-              if (!z.length) return null
-              const avgNdvi = z.reduce((s, x) => s + (x.mean_ndvi || 0), 0) / z.length
-              const area    = z.reduce((s, x) => s + (x.area_ha || 0), 0)
-              return (
-                <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: 2, background: ZONE_COLORS[cls], flexShrink: 0 }} />
-                  <span style={{ flex: 1, color: 'var(--text-primary)', fontWeight: 500 }}>{capitalize(cls)}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>NDVI {fmt(avgNdvi)}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>{fmt(area, 1)} ha</span>
+
+            <div className="field-sidebar__filters">
+              <div className="field-sidebar__search">
+                <Search size={16} />
+                <input
+                  placeholder="Search fields"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <div className="field-sidebar__sort">
+                <Filter size={14} />
+                <select value={sortMode} onChange={(e) => setSortMode(e.target.value)}>
+                  <option value="latest">Newest scan</option>
+                  <option value="health">Health</option>
+                  <option value="name">Name A-Z</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="field-sidebar__list">
+              {sortedFields.length === 0 && (
+                <div className="empty-state" style={{ padding: 24 }}>
+                  <p>No mapped fields yet. Add fields on the Farms page.</p>
                 </div>
-              )
-            })}
+              )}
+              {sortedFields.map(f => {
+                const status = getFieldStatus(f.ndvi)
+                return (
+                  <button
+                    key={f.id}
+                    className={`field-card${selectedFarmId === f.id ? ' active' : ''}`}
+                    onClick={() => setSelectedFarmId(f.id)}
+                  >
+                    <div className="field-card__title-row">
+                      <div className="field-card__title">{f.name}</div>
+                      <span className={`field-status field-status--${status.tone}`}>{status.label}</span>
+                    </div>
+                    <div className="field-card__meta">
+                      <span className="pill"><Leaf size={12} /> {f.crop_type || 'Crop'}</span>
+                      <span className="pill"><MapPin size={12} /> {formatArea(f.size_hectares || f.area)}</span>
+                    </div>
+                    <div className="field-card__bottom">
+                      <div className="ndvi-dot" style={{ background: ndviColor(f.ndvi) }} />
+                      <span className="field-card__ndvi">{f.ndvi != null ? f.ndvi.toFixed(3) : 'Awaiting scan'}</span>
+                      <span className="field-card__date">{f.last_satellite_date ? formatDate(f.last_satellite_date) : 'No capture yet'}</span>
+                      {satProgress[f.id] && (
+                        <span className="pill pill-progress">{satProgress[f.id].percent}% · {satProgress[f.id].stage}</span>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+
             <button
-              onClick={handleRecomputeZones}
-              disabled={recomputing}
-              style={{
-                marginTop: 8, width: '100%', padding: '6px 0',
-                background: 'var(--bg-body)', border: '1px solid var(--border)', borderRadius: 6,
-                color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}
+              className="btn btn-primary"
+              onClick={handleCreateNewFarm}
+              style={{ justifyContent: 'center' }}
             >
-              <RefreshCw size={12} className={recomputing ? 'spin' : ''} />
-              {recomputing ? 'Recomputing…' : 'Recompute Zones'}
+              <Plus size={14} /> Add field
             </button>
-          </div>
+          </>
         )}
-
-        {/* Hotspot summary */}
-        {hotspots.length > 0 && (
-          <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 8, padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <AlertTriangle size={14} color="#FF6F00" />
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#E65100' }}>
-                {hotspots.length} stress hotspot{hotspots.length !== 1 ? 's' : ''} detected
-              </span>
-            </div>
-            {hotspots.slice(0, 3).map((h, i) => (
-              <div key={i} style={{ fontSize: 11, color: '#BF360C', marginBottom: 2 }}>
-                • NDVI Δ {fmt(h.ndvi_delta, 3)} — {h.severity || 'medium'}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Scouting section */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-              <Camera size={11} style={{ marginRight: 4 }} />Field Scouting
-            </div>
-            <button
-              onClick={enableScoutingClick}
-              title="Click on the map to place an observation"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px',
-                borderRadius: 6, border: '1px solid var(--primary)', background: 'transparent',
-                color: 'var(--primary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              <Crosshair size={11} /> Add
-            </button>
-          </div>
-
-          {/* Inline scouting form */}
-          {scoutForm && (
-            <div style={{
-              background: 'var(--bg-body)', border: '1px solid var(--border)', borderRadius: 8,
-              padding: 12, marginBottom: 8,
-            }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--primary)', marginBottom: 8 }}>
-                📍 {scoutPending.lat ? `${Number(scoutPending.lat).toFixed(5)}, ${Number(scoutPending.lon).toFixed(5)}` : 'Click map to place pin…'}
-              </div>
-              <select
-                value={scoutData.type}
-                onChange={e => setScoutData(p => ({ ...p, type: e.target.value }))}
-                style={FIELD_STYLE}
-              >
-                {OBSERVATION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-              </select>
-              <select
-                value={scoutData.severity}
-                onChange={e => setScoutData(p => ({ ...p, severity: e.target.value }))}
-                style={{ ...FIELD_STYLE, marginTop: 6 }}
-              >
-                {['low', 'medium', 'high', 'critical'].map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <textarea
-                value={scoutData.notes}
-                onChange={e => setScoutData(p => ({ ...p, notes: e.target.value }))}
-                placeholder="Field notes…"
-                rows={2}
-                style={{ ...FIELD_STYLE, marginTop: 6, resize: 'none' }}
-              />
-              <input
-                value={scoutData.tags}
-                onChange={e => setScoutData(p => ({ ...p, tags: e.target.value }))}
-                placeholder="Tags (comma separated)"
-                style={{ ...FIELD_STYLE, marginTop: 6 }}
-              />
-              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                <button
-                  onClick={handleSaveObservation}
-                  disabled={scoutSaving || scoutPending.lat == null}
-                  style={{ flex: 1, padding: '6px 0', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                >
-                  {scoutSaving ? 'Saving…' : <><CheckCircle size={11} style={{ marginRight: 4 }} />Save</>}
-                </button>
-                <button
-                  onClick={() => { setScoutForm(false); disableScoutingClick(); setScoutPending({ lat: null, lon: null }) }}
-                  style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, cursor: 'pointer', color: 'var(--text-secondary)' }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Observation list */}
-          {scoutingObs.length > 0 ? (
-            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {scoutingObs.slice(0, 8).map(obs => (
-                <ObsRow key={obs.id} obs={obs} onDelete={() => handleDeleteObs(obs.id)} />
-              ))}
-            </div>
-          ) : (
-            <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: 0 }}>
-              No observations yet. Click <b>Add</b> then tap the map.
-            </p>
-          )}
-        </div>
-
-        {/* NDVI timeline toggle */}
-        <div>
-          <button
-            onClick={() => setShowTimeline(p => !p)}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              width: '100%', padding: '6px 0', background: 'none', border: 'none',
-              color: 'var(--text-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Activity size={13} color="var(--primary)" />
-              Vegetation Timeline
-            </span>
-            {showTimeline ? <EyeOff size={12} color="var(--text-secondary)" /> : <Eye size={12} color="var(--text-secondary)" />}
-          </button>
-          {showTimeline && selectedId && (
-            <div style={{ marginTop: 4 }}>
-              <VegetationTimeline farmId={selectedId} height={180} compact />
-            </div>
-          )}
-        </div>
-
-        {/* NDVI time slider (satellite history) */}
-        {tileHistory.length > 1 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 4 }}>
-              Satellite History
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500, marginBottom: 4 }}>
-              {tileHistory[tileHistoryIdx]?.date
-                ? new Date(tileHistory[tileHistoryIdx].date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-                : '—'}
-              {tileHistoryIdx === 0 && <span style={{ color: 'var(--primary)', marginLeft: 4, fontSize: 10 }}>(latest)</span>}
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={tileHistory.length - 1}
-              value={tileHistoryIdx}
-              onChange={e => setTileHistoryIdx(Number(e.target.value))}
-              style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer' }}
-              title="Drag to view NDVI for a past date"
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)', marginTop: 2 }}>
-              <span>{tileHistory[tileHistory.length - 1]?.date?.slice(0, 10)}</span>
-              <span>{tileHistory.length} dates</span>
-              <span>{tileHistory[0]?.date?.slice(0, 10)}</span>
-            </div>
-          </div>
-        )}
-
       </aside>
 
-      {/* ── MAP ──────────────────────────────────────────────────────────────── */}
-      <div
-        ref={mapRef}
-        style={{ flex: 1, position: 'relative' }}
-        aria-label="Satellite map"
-      />
-    </div>
-  )
-}
+      <section className="intelligent-map__stage">
+        <header className="intelligent-map__header">
+          <div>
+            <div className="eyebrow">Intelligent Map</div>
+            <h2>Satellite agronomy cockpit</h2>
+            <p className="map-subtitle">Interrogate every farm polygon with live {layerMetric.toUpperCase()} layers, weather overlays, and instant analytics.</p>
+          </div>
 
-// ─── sub-components ──────────────────────────────────────────────────────────
+          {selectedFarm && (
+            <div className="selected-summary">
+              <div className="selected-summary__title">{selectedFarm.name}</div>
+              <div className="selected-summary__meta">
+                <span className="pill"><Leaf size={12} /> {selectedFarm.crop_type || '—'}</span>
+                <span className="pill"><MapPin size={12} /> {formatArea(selectedFarm.size_hectares || selectedFarm.area)}</span>
+                <span className="pill"><Activity size={12} /> {selectedFarm.ndvi != null ? selectedFarm.ndvi.toFixed(3) : 'Awaiting NDVI'}</span>
+                <span className="pill"><CloudRain size={12} /> {selectedFarm.last_satellite_date ? formatDate(selectedFarm.last_satellite_date) : 'No capture yet'}</span>
+              </div>
+              <div className="selected-summary__actions">
+                <button className="btn btn-secondary" onClick={() => handleFetchSatellite(selectedFarm.id)}>
+                  <Satellite size={14} /> Rescan field
+                </button>
+              </div>
+            </div>
+          )}
+        </header>
 
-function InfoBadge({ label, value, color, span }) {
-  return (
-    <div style={{
-      background: 'var(--bg-body)', border: '1px solid var(--border)', borderRadius: 8,
-      padding: '8px 10px', gridColumn: span ? `span ${span}` : undefined,
-    }}>
-      <div style={{ fontSize: 10, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color, marginTop: 2 }}>{value}</div>
-    </div>
-  )
-}
+        <div className={`intelligent-map__canvas${selectedFarm ? ' intel-open' : ''}`}>
+          <MapboxFieldMap
+            height={700}
+            existingFields={fieldsWithBoundary}
+            selectedFieldId={selectedFarmId}
+            onSelectField={setSelectedFarmId}
+            readOnly={false}
+            metric={layerMetric}
+            onMetricChange={(next) => {
+              setLayerMetric(next)
+              setOverlayVisible(true)
+            }}
+            focusOnSelect
+            enableDrawing
+            initialBoundary={selectedFarm?.boundary_geojson || null}
+            onBoundaryChange={handleBoundaryChange}
+            onAreaChange={setDraftArea}
+            rasterTiles={tileSource}
+            rasterVisible={overlayVisible}
+            onRasterVisibleChange={setOverlayVisible}
+            onUploadGeoJson={() => fileInputRef.current?.click()}
+          />
 
-function LayerToggle({ active, onChange, color, label }) {
-  return (
-    <div
-      onClick={() => onChange(p => !p)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
-        background: active ? `${color}15` : 'transparent',
-        border: `1px solid ${active ? color + '40' : 'transparent'}`,
-      }}
-    >
-      <div style={{
-        width: 12, height: 12, borderRadius: 2, flexShrink: 0,
-        background: active ? color : '#cbd5e1', border: `1px solid ${active ? color : '#94a3b8'}`,
-      }} />
-      <span style={{ fontSize: 12, color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: active ? 500 : 400 }}>
-        {label}
-      </span>
-    </div>
-  )
-}
+          <input
+            type="file"
+            accept=".geojson,.json"
+            style={{ display: 'none' }}
+            onChange={onUploadChange}
+            ref={fileInputRef}
+          />
 
-function ObsRow({ obs, onDelete }) {
-  const color = SEV_COLORS[obs.severity] || '#607D8B'
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px',
-      background: 'var(--bg-body)', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11,
-    }}>
-      <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-        {obs.observation_type?.replace(/_/g, ' ')}
-        {obs.notes ? ` — ${obs.notes.slice(0, 40)}` : ''}
-      </span>
-      <button
-        onClick={onDelete}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 2, flexShrink: 0 }}
-        title="Delete observation"
-      >
-        <Trash2 size={11} />
-      </button>
-    </div>
-  )
-}
+          <div className="intelligent-map__legend">
+            {NDVI_BANDS.map(band => (
+              <span key={band.label} className="legend-item">
+                <span style={{ background: band.color }} />{band.label}
+              </span>
+            ))}
+          </div>
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-const FIELD_STYLE = {
-  width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)',
-  background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box',
-}
-
-const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
-
-// ─── PhenologyCard ───────────────────────────────────────────────────────────
-
-const STAGE_META = {
-  emergence:    { label: 'Emergence',    color: '#81C784', icon: '🌱' },
-  vegetative:   { label: 'Vegetative',   color: '#4CAF50', icon: '🌿' },
-  flowering:    { label: 'Flowering',    color: '#FFC107', icon: '🌸' },
-  grain_filling:{ label: 'Grain Filling',color: '#FF9800', icon: '🌾' },
-  maturity:     { label: 'Maturity',     color: '#795548', icon: '✅' },
-}
-
-function PhenologyCard({ phenology }) {
-  const stage   = phenology?.detected_stage || 'vegetative'
-  const meta    = STAGE_META[stage] || { label: capitalize(stage), color: '#607D8B', icon: '📊' }
-  const conf    = Math.round((phenology?.confidence || 0) * 100)
-  const method  = phenology?.detection_method || 'spectral_curve'
-  return (
-    <div style={{
-      background: `${meta.color}12`, border: `1px solid ${meta.color}50`,
-      borderRadius: 8, padding: '10px 12px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 18 }}>{meta.icon}</span>
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Growth Stage</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: meta.color }}>{meta.label}</div>
+          <div className={`intelligent-map__intel${selectedFarm ? ' open' : ''}`}>
+            {intelLoading ? (
+              <div className="intel-loading">
+                <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
+                Loading intelligence…
+              </div>
+            ) : (
+              <div className="intel-panel-scroll">
+                <FieldIntelligencePanel farm={selectedFarm} history={fieldHistory} weather={weatherSummary} />
+              </div>
+            )}
+          </div>
+          {draftGeometry && (
+            <div className="draft-card">
+              <div className="draft-card__header">
+                <div>
+                  <div className="eyebrow">New field</div>
+                  <strong>Save drawn area</strong>
+                </div>
+                <button className="btn btn-secondary btn-sm" onClick={resetDraft}>Clear</button>
+              </div>
+              <div className="draft-card__form">
+                <input value={draftName} onChange={(e) => setDraftName(e.target.value)} placeholder="Field name" />
+                <input value={draftCrop} onChange={(e) => setDraftCrop(e.target.value)} placeholder="Crop (optional)" />
+                <div className="draft-card__meta">Area: {draftArea ? `${draftArea.toFixed(2)} ha` : '—'}</div>
+                <div className="draft-card__actions">
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Upload GeoJSON
+                  </button>
+                  <button className="btn btn-primary btn-sm" onClick={handleSaveField} disabled={savingDraft}>
+                    {savingDraft ? 'Saving…' : 'Save & scan'}
+                  </button>
+                </div>
+                {draftError && <div className="error-box" style={{ marginTop: 8 }}>{draftError}</div>}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-      {/* confidence bar */}
-      <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, marginBottom: 6 }}>
-        <div style={{ height: '100%', width: `${conf}%`, background: meta.color, borderRadius: 2, transition: 'width .4s' }} />
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 11, color: 'var(--text-secondary)' }}>
-        <span>Confidence: <b style={{ color: 'var(--text-primary)' }}>{conf}%</b></span>
-        <span>Method: <b style={{ color: 'var(--text-primary)' }}>{method.replace(/_/g, ' ')}</b></span>
-        {phenology?.ndvi_at_detection != null && (
-          <span>NDVI: <b style={{ color: 'var(--text-primary)' }}>{Number(phenology.ndvi_at_detection).toFixed(3)}</b></span>
-        )}
-        {phenology?.gdd_accumulated != null && (
-          <span>GDD: <b style={{ color: 'var(--text-primary)' }}>{Math.round(phenology.gdd_accumulated)}°C·d</b></span>
-        )}
-      </div>
+
+        {error && <div className="error-box" style={{ marginTop: 12 }}>{error}</div>}
+        {tileError && <div className="error-box" style={{ marginTop: 12 }}>{tileError}</div>}
+      </section>
     </div>
-  )
-}
-
-// ─── FusionStatusRow ─────────────────────────────────────────────────────────
-
-function FusionStatusRow({ status }) {
-  const total   = status?.total_observations || 0
-  const s2      = status?.by_source?.sentinel2 || 0
-  const sar     = status?.sar_filled  || 0
-  const ls      = status?.landsat_filled || 0
-  const cov     = Math.round((status?.coverage_pct || 0) * 100)
-  if (!total) return null
-  return (
-    <div style={{
-      background: 'var(--bg-body)', border: '1px solid var(--border)',
-      borderRadius: 8, padding: '8px 12px',
-    }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
-        Satellite Fusion Coverage
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <FusionChip label="S2 optical" value={s2}  color="#2196F3" />
-        <FusionChip label="SAR fills"  value={sar} color="#FF9800" />
-        <FusionChip label="Landsat"    value={ls}  color="#9C27B0" />
-      </div>
-      <div style={{ marginTop: 6, height: 4, background: 'var(--border)', borderRadius: 2 }}>
-        <div style={{ height: '100%', width: `${cov}%`, background: 'var(--primary)', borderRadius: 2, transition: 'width .4s' }} />
-      </div>
-      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 3 }}>{cov}% coverage ({total} obs)</div>
-    </div>
-  )
-}
-
-function FusionChip({ label, value, color }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600,
-      background: `${color}18`, border: `1px solid ${color}40`, color,
-    }}>
-      {value} {label}
-    </span>
   )
 }

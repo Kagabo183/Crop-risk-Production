@@ -3,7 +3,7 @@ import Header from './Header'
 import { useState } from 'react'
 
 export default function WebLayout({ children, titles, apiStatus }) {
-    const [sidebarOpen, setSidebarOpen] = useState(true)
+    const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
 
     return (
         <div className="web-layout">
@@ -12,6 +12,7 @@ export default function WebLayout({ children, titles, apiStatus }) {
                 <Header
                     titles={titles}
                     apiStatus={apiStatus}
+                    sidebarOpen={sidebarOpen}
                     onMenuClick={() => setSidebarOpen(!sidebarOpen)}
                 />
                 <main className="web-content">

@@ -37,15 +37,15 @@ def fetch_all_farms_imagery():
         
         for farm in farms:
             try:
-                images = satellite_service.process_farm_imagery(
+                metrics = satellite_service.process_farm_imagery(
                     db=db,
                     farm_id=farm.id,
                     days_back=7  # Look back 7 days for new imagery
                 )
                 
-                if images:
+                if metrics:
                     results['success'] += 1
-                    logger.info(f"Processed {len(images)} images for farm {farm.id}")
+                    logger.info(f"Processed {len(metrics)} observations for farm {farm.id}")
                 else:
                     results['no_data'] += 1
                     logger.warning(f"No imagery found for farm {farm.id}")
@@ -75,14 +75,14 @@ def calculate_vegetation_indices(farm_id: int):
         satellite_service = SatelliteDataService()
         
         # Process imagery for the farm
-        images = satellite_service.process_farm_imagery(
+        metrics = satellite_service.process_farm_imagery(
             db=db,
             farm_id=farm_id,
             days_back=3
         )
         
-        logger.info(f"Calculated indices for {len(images)} images for farm {farm_id}")
-        return {'farm_id': farm_id, 'images_processed': len(images)}
+        logger.info(f"Calculated indices for {len(metrics)} observations for farm {farm_id}")
+        return {'farm_id': farm_id, 'observations_processed': len(metrics)}
         
     except Exception as e:
         logger.error(f"Error calculating vegetation indices for farm {farm_id}: {e}")
@@ -230,52 +230,52 @@ def process_single_farm(self, farm_id: int, days_back: int = 30):
         satellite_service = SatelliteDataService()
         stress_service = StressDetectionService()
 
-        # Stage 2: Fetching imagery
-        self.update_state(state='PROGRESS', meta={
-            'percent': 30, 'stage': 'Fetching satellite imagery...',
-            'farm_id': farm_id,
-        })
+        def report(percent: int, stage: str) -> None:
+            self.update_state(state='PROGRESS', meta={
+                'percent': int(percent),
+                'stage': stage,
+                'farm_id': farm_id,
+            })
 
-        images = satellite_service.process_farm_imagery(
+        # Stage 2: Fetching imagery (detailed progress is reported inside the service)
+        report(30, 'Fetching satellite imagery...')
+
+        metrics = satellite_service.process_farm_imagery(
             db=db,
             farm_id=farm_id,
-            days_back=days_back
+            days_back=days_back,
+            progress_cb=report,
         )
 
-        if images:
-            # Stage 3: Calculating indices
-            self.update_state(state='PROGRESS', meta={
-                'percent': 60,
-                'stage': f'Calculating vegetation indices ({len(images)} images)...',
-                'farm_id': farm_id,
-            })
-
-            # Stage 4: Stress detection
-            self.update_state(state='PROGRESS', meta={
-                'percent': 80, 'stage': 'Running stress detection...',
-                'farm_id': farm_id,
-            })
+        if metrics:
+            # Stage 3: Stress detection
+            report(75, 'Running stress detection...')
 
             assessment = stress_service.calculate_composite_health_score(db, farm_id)
 
-            # Stage 5: Saving
-            self.update_state(state='PROGRESS', meta={
-                'percent': 90, 'stage': 'Saving health records...',
-                'farm_id': farm_id,
-            })
+            # Stage 4: Saving
+            report(90, 'Saving health records...')
 
             # Use the latest image date for vegetation health record
-            latest_image_date = max(img.date for img in images)
+            latest_image_date = max(m.observation_date for m in metrics)
             stress_service.update_vegetation_health_record(
                 db=db,
                 farm_id=farm_id,
                 date=latest_image_date
             )
 
+            # Stage 5: AI crop classification
+            report(95, 'Classifying crop type...')
+            try:
+                from app.services.field_classification_service import classify_farm
+                classify_farm(farm_id, db)
+            except Exception as exc:
+                logger.warning("Crop classification failed for farm %s: %s", farm_id, exc)
+
             return {
                 'percent': 100, 'stage': 'Complete',
                 'farm_id': farm_id,
-                'images_processed': len(images),
+                'observations_processed': len(metrics),
                 'health_score': assessment['health_score'],
                 'stress_level': assessment['stress_level'],
             }
@@ -283,7 +283,7 @@ def process_single_farm(self, farm_id: int, days_back: int = 30):
             return {
                 'percent': 100, 'stage': 'Complete',
                 'farm_id': farm_id,
-                'images_processed': 0,
+                'observations_processed': 0,
                 'message': 'No imagery found',
             }
 

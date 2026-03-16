@@ -44,7 +44,7 @@ const CustomTooltip = ({ active, payload, label }) => {
   )
 }
 
-export default function VegetationTimeline({ farmId, daysBack = 90, height = 220, compact = false }) {
+export default function VegetationTimeline({ farmId, daysBack = 90, height = 220, compact = false, cropInfo = null }) {
   const [series, setSeries] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -90,6 +90,17 @@ export default function VegetationTimeline({ farmId, daysBack = 90, height = 220
 
   return (
     <div>
+      {/* Crop info header band */}
+      {cropInfo?.crop && (
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 6, padding: '4px 8px', background: 'rgba(76,175,80,0.08)', borderRadius: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+            &#127807; {cropInfo.crop.charAt(0).toUpperCase() + cropInfo.crop.slice(1)}
+          </span>
+          {cropInfo.growthStage && cropInfo.growthStage !== 'unknown' && (
+            <span style={{ opacity: 0.75 }}>Stage: {cropInfo.growthStage.charAt(0).toUpperCase() + cropInfo.growthStage.slice(1)}</span>
+          )}
+        </div>
+      )}
       {/* Legend / toggle buttons */}
       {!compact && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>

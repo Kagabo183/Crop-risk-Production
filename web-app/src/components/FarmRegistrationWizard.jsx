@@ -3,7 +3,7 @@ import {
   MapPin, Leaf, Navigation, Scan, Footprints, Search, Check,
   ChevronRight, ChevronLeft, X, Loader, Square, Maximize2, Info
 } from 'lucide-react'
-import FarmBoundaryMap from './FarmBoundaryMap'
+import MapboxFieldMap from './MapboxFieldMap'
 import WalkMyFarm from './WalkMyFarm'
 import ParcelLookup from './ParcelLookup'
 import LOCATIONS from '../data/locations.json'
@@ -29,7 +29,7 @@ const STEPS = [
 
 const emptyForm = {
   name: '', district: '', sector: '', cell: '', village: '',
-  province: '', crop_type: '', area: '', latitude: '', longitude: '',
+  province: '', crop_type: '', area: '', latitude: '', longitude: '', planting_date: '', season: '',
 }
 
 // Geodesic area from polygon coordinates (Shoelace formula)
@@ -89,6 +89,8 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
         area: editingFarm.area != null ? String(editingFarm.area) : '',
         latitude: editingFarm.latitude != null ? String(editingFarm.latitude) : '',
         longitude: editingFarm.longitude != null ? String(editingFarm.longitude) : '',
+        planting_date: editingFarm.planting_date || '',
+        season: editingFarm.season || '',
       })
       // TODO: load existing boundary if available
     }
@@ -167,13 +169,14 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
     setFormData(prev => ({ ...prev, latitude: lat.toFixed(6), longitude: lng.toFixed(6) }))
   }, [])
 
-  const handleBoundaryChange = useCallback((geom) => {
+  const handleBoundaryChange = useCallback((geom, areaHaOverride = null) => {
     setBoundary(geom)
-    if (geom && geom.coordinates && geom.coordinates[0]) {
-      const area = calcAreaHectares(geom.coordinates[0])
-      if (area > 0) {
-        setFormData(prev => ({ ...prev, area: area.toFixed(2) }))
-      }
+    if (!geom) return
+    const area = areaHaOverride != null && !Number.isNaN(areaHaOverride)
+      ? areaHaOverride
+      : (geom.coordinates && geom.coordinates[0] ? calcAreaHectares(geom.coordinates[0]) : 0)
+    if (area > 0) {
+      setFormData(prev => ({ ...prev, area: area.toFixed(2) }))
     }
   }, [])
 
@@ -210,6 +213,7 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
   const handleSubmit = async () => {
     setSubmitting(true)
     setError(null)
+    let savedFarm = null
     try {
       const locationParts = [formData.district, formData.sector, formData.cell, formData.village].filter(Boolean)
       const payload = {
@@ -220,20 +224,24 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
         area: formData.area ? parseFloat(formData.area) : null,
         latitude: formData.latitude ? parseFloat(formData.latitude) : null,
         longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        planting_date: formData.planting_date || null,
+        season: formData.season || null,
         boundary: boundary || undefined,
       }
       if (editingFarm?.id) {
-        await updateFarm(editingFarm.id, payload)
+        const res = await updateFarm(editingFarm.id, payload)
+        savedFarm = res.data ? { ...editingFarm, ...res.data } : { ...editingFarm, ...payload, id: editingFarm.id }
         if (boundary) {
           try { await saveFarmBoundary(editingFarm.id, boundary) } catch { /* saved with update */ }
         }
       } else {
         const res = await createFarm(payload)
+        savedFarm = res.data || null
         if (boundary && res.data?.id) {
           try { await saveFarmBoundary(res.data.id, boundary) } catch { /* non-critical */ }
         }
       }
-      if (onSaved) onSaved()
+      if (onSaved) onSaved(savedFarm)
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save farm')
     }
@@ -399,6 +407,14 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
                   <small className="form-hint">Comma-separated for multiple crops</small>
                 </div>
                 <div className="form-group">
+                  <label>Planting Date</label>
+                  <input className="form-control" type="date" name="planting_date" value={formData.planting_date} onChange={handleChange} />
+                </div>
+                <div className="form-group">
+                  <label>Season</label>
+                  <input className="form-control" name="season" value={formData.season} onChange={handleChange} placeholder="e.g. 2026A" />
+                </div>
+                <div className="form-group">
                   <label>Area (hectares)</label>
                   <input className="form-control" name="area" type="number" step="any" min="0" value={formData.area} onChange={handleChange} placeholder="e.g. 2.5" />
                   <small className="form-hint">Auto-calculated if you draw a boundary</small>
@@ -462,12 +478,11 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
               </div>
 
               <div className="wizard-map-wrap">
-                <FarmBoundaryMap
-                  initialLat={formData.latitude ? parseFloat(formData.latitude) : -1.95}
-                  initialLon={formData.longitude ? parseFloat(formData.longitude) : 30.06}
+                <MapboxFieldMap
                   initialBoundary={boundary}
                   onLocationChange={handleLocationChange}
                   onBoundaryChange={handleBoundaryChange}
+                  onAreaChange={(area) => area && setFormData(prev => ({ ...prev, area: area.toFixed(2) }))}
                 />
               </div>
             </div>
@@ -561,12 +576,11 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
 
               {/* Interactive boundary map */}
               <div className="wizard-map-wrap">
-                <FarmBoundaryMap
-                  initialLat={formData.latitude ? parseFloat(formData.latitude) : -1.95}
-                  initialLon={formData.longitude ? parseFloat(formData.longitude) : 30.06}
+                <MapboxFieldMap
                   initialBoundary={boundary}
                   onLocationChange={handleLocationChange}
                   onBoundaryChange={handleBoundaryChange}
+                  onAreaChange={(area) => area && setFormData(prev => ({ ...prev, area: area.toFixed(2) }))}
                 />
               </div>
 
@@ -613,11 +627,10 @@ export default function FarmRegistrationWizard({ editingFarm, onSaved, onCancel 
                     </dl>
                     {formData.latitude && formData.longitude && (
                       <div className="wizard-review-map">
-                        <FarmBoundaryMap
-                          initialLat={parseFloat(formData.latitude)}
-                          initialLon={parseFloat(formData.longitude)}
+                        <MapboxFieldMap
                           initialBoundary={boundary}
                           readOnly
+                          existingFields={boundary ? [{ id: editingFarm?.id || 'draft', name: formData.name, boundary_geojson: boundary, ndvi: null }] : []}
                         />
                       </div>
                     )}

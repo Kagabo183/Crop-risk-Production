@@ -18,6 +18,13 @@ class Farm(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     planting_date = Column(Date, nullable=True)
+    season = Column(String(50), nullable=True)
+
+    # AI-detected crop intelligence (written by satellite task / classify on fetch)
+    detected_crop       = Column(String(80), nullable=True)   # e.g. "potato"
+    crop_confidence     = Column(Float,      nullable=True)   # 0.0 – 1.0
+    detected_growth_stage = Column(String(50), nullable=True) # e.g. "vegetative"
+    last_satellite_date = Column(Date,       nullable=True)   # date of latest imagery used
 
     # Relationships
     owner = relationship("User", back_populates="farms")
