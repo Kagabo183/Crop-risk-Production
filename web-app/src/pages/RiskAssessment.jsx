@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { ShieldAlert, TrendingDown, Lightbulb, AlertTriangle } from 'lucide-react'
 import { getFarms, getRiskAssessment, explainRisk, predictYield } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 const RISK_COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626', severe: '#7c2d12' }
 const RISK_BG = { low: 'var(--success-light)', moderate: 'var(--warning-light)', high: 'var(--danger-light)', severe: 'var(--danger-light)' }
@@ -53,6 +54,9 @@ export default function RiskAssessment() {
   useEffect(() => {
     if (selectedFarm) loadRisk()
   }, [selectedFarm])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => { if (selectedFarm) loadRisk() })
 
   const riskLevel = risk?.risk_level || 'low'
   const riskScore = risk?.overall_risk_score ?? risk?.risk_score ?? 0

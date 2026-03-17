@@ -11,6 +11,7 @@ import {
   getVraMapsForFarm, computeVraMap,
   exportVraGeoJson, exportVraIsoxml,
 } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 const PRESCRIPTION_TYPES = [
   { key: 'fertilizer', label: 'Fertilizer', unit: 'kg/ha' },
@@ -56,6 +57,14 @@ export default function VraDashboard() {
       })
       .catch(console.error)
   }, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => {
+    getFarms().then(res => {
+      const list = Array.isArray(res.data) ? res.data : res.data.farms || []
+      setFarms(list)
+    }).catch(() => {})
+  })
 
   // Load seasons + vra maps when farm changes
   useEffect(() => {

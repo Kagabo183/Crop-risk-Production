@@ -81,6 +81,8 @@ import {
 } from '../api'
 
 import { formatDate } from '../utils/formatDate'
+import { emitFarmDataUpdated } from '../utils/farmEvents'
+import { analyzeFarmRisk } from '../api'
 
 
 
@@ -575,6 +577,10 @@ export default function SatelliteDashboard() {
 
             loadData()
 
+            // Trigger full risk pipeline + notify all pages
+            analyzeFarmRisk(farmId, { forceRefresh: true }).catch(() => {})
+            emitFarmDataUpdated(farmId)
+
             setTimeout(() => setSatProgress(prev => { const next = { ...prev }; delete next[farmId]; return next }), 2000)
 
           } else {
@@ -663,6 +669,12 @@ export default function SatelliteDashboard() {
         }).catch(() => {})
 
       }
+
+      // Trigger full risk pipeline so all downstream data (disease, alerts, stress) updates
+      analyzeFarmRisk(farmId, { forceRefresh: true }).catch(() => {})
+
+      // Notify all other pages to re-fetch
+      emitFarmDataUpdated(farmId)
 
       setTimeout(() => setSatProgress(prev => { const next = { ...prev }; delete next[farmId]; return next }), 2000)
 

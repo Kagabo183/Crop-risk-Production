@@ -10,6 +10,7 @@ import {
   getFarms, getSeasonsForFarm, createSeason, updateSeason,
   deleteSeason, getCropRotationHistory, generateCropRotation,
 } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,14 @@ export default function SeasonManager() {
       })
       .catch(console.error)
   }, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => {
+    getFarms().then(res => {
+      const list = Array.isArray(res.data) ? res.data : res.data.farms || []
+      setFarms(list)
+    }).catch(() => {})
+  })
 
   // Load seasons + rotation when farm changes
   useEffect(() => {

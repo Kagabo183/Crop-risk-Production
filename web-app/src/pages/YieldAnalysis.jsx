@@ -11,6 +11,7 @@ import {
 import {
   getFarms, getSeasonsForFarm, getYieldMapsForFarm, uploadYieldMap, deleteYieldMap,
 } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,14 @@ export default function YieldAnalysis() {
       })
       .catch(console.error)
   }, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => {
+    getFarms().then(res => {
+      const list = Array.isArray(res.data) ? res.data : res.data.farms || []
+      setFarms(list)
+    }).catch(() => {})
+  })
 
   // Load seasons + yield maps when farm changes
   useEffect(() => {

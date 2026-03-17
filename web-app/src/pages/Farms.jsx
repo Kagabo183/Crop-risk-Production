@@ -10,7 +10,9 @@ import {
   getFarms,
   getFarmSatellite,
   getTaskStatus,
+  analyzeFarmRisk,
 } from '../api'
+import { emitFarmDataUpdated, useFarmDataListener } from '../utils/farmEvents'
 
 export default function Farms() {
   const [farms, setFarms] = useState([])
@@ -33,6 +35,9 @@ export default function Farms() {
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(loadData)
 
   useEffect(() => () => {
     Object.values(pollTimers.current).forEach(clearInterval)
@@ -72,6 +77,8 @@ export default function Farms() {
           delete pollTimers.current[farmId]
           if (state === 'SUCCESS') {
             loadData()
+            analyzeFarmRisk(farmId, { forceRefresh: true }).catch(() => {})
+            emitFarmDataUpdated(farmId)
             setTimeout(() => setSatProgress(prev => {
               const next = { ...prev }
               delete next[farmId]

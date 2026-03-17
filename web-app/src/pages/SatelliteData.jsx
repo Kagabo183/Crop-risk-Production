@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import { Satellite, Download, AlertTriangle, Database, Calendar } from 'lucide-react'
 import { getFarmSatellite, getNdviHistory, getFarms, triggerSatelliteDownload, fetchPipelineData, fetchRealData, getFetchStatus } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 import { useAuth } from '../context/AuthContext'
 
 export default function SatelliteData() {
@@ -44,6 +45,9 @@ export default function SatelliteData() {
   }
 
   useEffect(() => { loadData() }, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(loadData)
 
   useEffect(() => {
     if (!selectedFarm) return

@@ -9,6 +9,7 @@ import {
   getFarms, getDiseases, getDiseaseForecasts, getWeeklyForecast,
   getDiseaseStatistics, getFarmPredictions,
 } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 const RISK_COLORS = { low: '#16a34a', moderate: '#d97706', high: '#dc2626', severe: '#7c2d12' }
 
@@ -64,6 +65,9 @@ export default function DiseaseForecasts() {
   useEffect(() => {
     if (selectedFarm && selectedDisease) loadForecasts()
   }, [selectedFarm, selectedDisease])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => { if (selectedFarm && selectedDisease) loadForecasts() })
 
   return (
     <>

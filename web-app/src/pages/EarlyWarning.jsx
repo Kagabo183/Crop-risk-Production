@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { usePlatform } from '../context/PlatformContext'
 import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
 import { getEarlyWarnings, fetchWeatherAll } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 const LEVEL_COLORS = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706', low: '#16a34a' }
 const LEVEL_LABELS = { critical: 'Critical', high: 'High', moderate: 'Moderate', low: 'Low' }
@@ -22,6 +23,9 @@ export default function EarlyWarning() {
   }
 
   useEffect(load, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(load)
 
   const handleFetchWeather = async () => {
     setFetching(true)

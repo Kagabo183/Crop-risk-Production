@@ -9,6 +9,7 @@ import {
   getFarms, getStressAssessment, getVegetationHealth,
   getVegetationIndices, getDroughtAssessment, getWaterStress, getHeatStress,
 } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 export default function StressMonitoring() {
   const [farms, setFarms] = useState([])
@@ -85,6 +86,9 @@ export default function StressMonitoring() {
   useEffect(() => {
     if (selectedFarm) loadData()
   }, [selectedFarm])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(() => { if (selectedFarm) loadData() })
 
   const stressColor = (level) => {
     const map = { none: '#16a34a', low: '#16a34a', moderate: '#d97706', high: '#dc2626', severe: '#7c2d12' }

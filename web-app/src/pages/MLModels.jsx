@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Cpu, CheckCircle, XCircle, AlertTriangle, RefreshCw } from 'lucide-react'
 import { getModelStatus, getSupportedDiseases, detectAnomalies, forecastHealth, getFarms } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 
 const STATUS_ICONS = {
   ready: { icon: CheckCircle, color: 'var(--success)', bg: 'var(--success-light)' },
@@ -42,6 +43,9 @@ export default function MLModels() {
         setLoading(false)
       })
   }, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(refresh)
 
   const refresh = () => {
     setLoading(true)

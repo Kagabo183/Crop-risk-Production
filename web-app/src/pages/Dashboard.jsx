@@ -7,6 +7,7 @@ import {
   Clock, Plus, Map, Layers, ChevronRight, Sprout, RefreshCw, TrendingUp,
 } from 'lucide-react'
 import { getFarms, getFarmSatellite, getModelStatus, getEarlyWarnings } from '../api'
+import { useFarmDataListener } from '../utils/farmEvents'
 import { useAuth } from '../context/AuthContext'
 import { usePlatform } from '../context/PlatformContext'
 import VegetationTimeline from '../components/VegetationTimeline'
@@ -74,7 +75,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
+  const loadAll = () => {
     Promise.allSettled([
       getFarms(),
       getFarmSatellite(),
@@ -91,7 +92,12 @@ export default function Dashboard() {
       setError(e.message)
       setLoading(false)
     })
-  }, [])
+  }
+
+  useEffect(loadAll, [])
+
+  // Re-fetch when another page triggers a scan
+  useFarmDataListener(loadAll)
 
   if (loading) return (
     <div className="db-page fade-in">
