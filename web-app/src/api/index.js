@@ -92,6 +92,8 @@ export const getTaskStatus = (taskId) =>
   api.get(`/stress-monitoring/task-status/${taskId}`)
 export const autoFetchSatellite = (farmId) =>
   api.post(`/farms/${farmId}/auto-fetch-satellite`)
+export const quickScanFarm = (farmId, daysBack = 30) =>
+  api.post(`/farms/${farmId}/quick-scan`, null, { params: { days_back: daysBack }, timeout: 30000 })
 
 // ── Farm Satellite ──
 export const getFarmSatellite = () => api.get('/farm-satellite/')
@@ -263,5 +265,17 @@ export const uploadYieldMap       = (farmId, file, { seasonId, cropType, harvest
 }
 export const getYieldMap          = (yieldId)          => api.get(`/precision-ag/yield-maps/${yieldId}`)
 export const deleteYieldMap       = (yieldId)          => api.delete(`/precision-ag/yield-maps/${yieldId}`)
+export const getYieldEstimate     = (farmId)           => api.get(`/precision-ag/farms/${farmId}/yield-estimate`)
+
+// ── Open-Meteo (Rwanda weather, no API key required) ──────────────────────────
+export const fetchOpenMeteo = async (lat, lon) => {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `&daily=temperature_2m_max,precipitation_sum,wind_speed_10m_max` +
+    `&current=temperature_2m,precipitation,wind_speed_10m` +
+    `&timezone=Africa%2FKigali`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Open-Meteo fetch failed')
+  return res.json()
+}
 
 export default api

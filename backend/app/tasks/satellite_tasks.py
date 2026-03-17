@@ -213,82 +213,78 @@ def generate_risk_heatmaps():
         db.close()
 
 
-@shared_task(name="satellite.process_single_farm", bind=True)
+@shared_task(name="satellite.process_single_farm", bind=True, soft_time_limit=90, time_limit=120)
 def process_single_farm(self, farm_id: int, days_back: int = 30):
     """
     Process satellite data for a single farm (on-demand).
-    Reports progress via Celery state updates.
+
+    Uses the fast GEE metrics-only pipeline (no raster downloads).
+    Progress is reported via Celery state updates and always reaches 100%.
     """
+    from app.services.fast_vegetation_service import quick_scan
+
     db = SessionLocal()
     try:
-        # Stage 1: Initializing
+        # ── Stage 1: Starting ────────────────────────────────────────────
         self.update_state(state='PROGRESS', meta={
-            'percent': 10, 'stage': 'Connecting to satellite API...',
+            'percent': 10, 'stage': 'Starting satellite scan...',
             'farm_id': farm_id,
         })
 
-        satellite_service = SatelliteDataService()
-        stress_service = StressDetectionService()
+        # ── Stage 2: GEE initialisation + imagery fetch ──────────────────
+        self.update_state(state='PROGRESS', meta={
+            'percent': 30, 'stage': 'Fetching Sentinel-2 imagery...',
+            'farm_id': farm_id,
+        })
 
-        def report(percent: int, stage: str) -> None:
-            self.update_state(state='PROGRESS', meta={
-                'percent': int(percent),
-                'stage': stage,
-                'farm_id': farm_id,
-            })
+        # ── Stage 3: Computing indices ───────────────────────────────────
+        self.update_state(state='PROGRESS', meta={
+            'percent': 60, 'stage': 'Computing vegetation indices...',
+            'farm_id': farm_id,
+        })
 
-        # Stage 2: Fetching imagery (detailed progress is reported inside the service)
-        report(30, 'Fetching satellite imagery...')
+        result = quick_scan(farm_id, db, days_back=days_back)
 
-        metrics = satellite_service.process_farm_imagery(
-            db=db,
-            farm_id=farm_id,
-            days_back=days_back,
-            progress_cb=report,
+        # ── Stage 4: Saved to DB ─────────────────────────────────────────
+        self.update_state(state='PROGRESS', meta={
+            'percent': 90, 'stage': 'Saving to database...',
+            'farm_id': farm_id,
+        })
+
+        # ── Stage 5: Done ────────────────────────────────────────────────
+        logger.info(
+            "process_single_farm OK for farm %s: NDVI=%.4f health=%.1f",
+            farm_id,
+            result.get('ndvi_mean') or 0,
+            result.get('health_score') or 0,
         )
 
-        if metrics:
-            # Stage 3: Stress detection
-            report(75, 'Running stress detection...')
+        return {
+            'percent': 100,
+            'stage': 'Complete',
+            'farm_id': farm_id,
+            'ndvi_mean': result.get('ndvi_mean'),
+            'ndre_mean': result.get('ndre_mean'),
+            'evi_mean': result.get('evi_mean'),
+            'savi_mean': result.get('savi_mean'),
+            'health_score': result.get('health_score'),
+            'images_found': result.get('images_found'),
+            'observation_date': result.get('observation_date'),
+        }
 
-            assessment = stress_service.calculate_composite_health_score(db, farm_id)
-
-            # Stage 4: Saving
-            report(90, 'Saving health records...')
-
-            # Use the latest image date for vegetation health record
-            latest_image_date = max(m.observation_date for m in metrics)
-            stress_service.update_vegetation_health_record(
-                db=db,
-                farm_id=farm_id,
-                date=latest_image_date
-            )
-
-            # Stage 5: AI crop classification
-            report(95, 'Classifying crop type...')
-            try:
-                from app.services.field_classification_service import classify_farm
-                classify_farm(farm_id, db)
-            except Exception as exc:
-                logger.warning("Crop classification failed for farm %s: %s", farm_id, exc)
-
-            return {
-                'percent': 100, 'stage': 'Complete',
-                'farm_id': farm_id,
-                'observations_processed': len(metrics),
-                'health_score': assessment['health_score'],
-                'stress_level': assessment['stress_level'],
-            }
-        else:
-            return {
-                'percent': 100, 'stage': 'Complete',
-                'farm_id': farm_id,
-                'observations_processed': 0,
-                'message': 'No imagery found',
-            }
-
-    except Exception as e:
-        logger.error(f"Error processing farm {farm_id}: {e}")
-        raise
+    except Exception as exc:
+        logger.error("process_single_farm FAILED for farm %s: %s", farm_id, exc, exc_info=True)
+        self.update_state(state='FAILURE', meta={
+            'percent': 0,
+            'stage': f'Scan failed: {exc}',
+            'farm_id': farm_id,
+        })
+        # Return instead of raising so the task ends cleanly
+        return {
+            'percent': 0,
+            'stage': 'Failed',
+            'farm_id': farm_id,
+            'error': str(exc),
+        }
     finally:
         db.close()

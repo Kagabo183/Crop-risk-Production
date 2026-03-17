@@ -589,3 +589,104 @@ def delete_yield_map(
         raise HTTPException(404, f"Yield map {yield_id} not found")
     db.delete(ym)
     db.commit()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# YIELD ESTIMATION (from NDVI)
+# ════════════════════════════════════════════════════════════════════════════
+
+# Crop yield factors: estimated yield (t/ha) when NDVI = 1.0
+# Real yields are: yield = NDVI_mean * factor * area_adjustment
+CROP_YIELD_FACTORS = {
+    "maize": 8.5,
+    "corn": 8.5,
+    "wheat": 6.0,
+    "rice": 7.5,
+    "soybean": 4.0,
+    "soy": 4.0,
+    "potato": 25.0,
+    "cassava": 15.0,
+    "beans": 3.0,
+    "coffee": 2.5,
+    "tea": 3.0,
+    "sorghum": 5.0,
+    "banana": 20.0,
+    "default": 6.0,
+}
+
+
+@router.get("/farms/{farm_id}/yield-estimate")
+def estimate_yield_from_ndvi(
+    farm_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Estimate yield from latest NDVI data and productivity zones.
+    Uses a simple linear model: yield_tha = NDVI_mean * crop_factor
+    """
+    from app.models.farm import Farm
+    from app.models.data import VegetationHealth
+    from app.models.geo_intelligence import ProductivityZone
+    from sqlalchemy import desc
+
+    farm = db.query(Farm).filter(Farm.id == farm_id).first()
+    if not farm:
+        raise HTTPException(404, f"Farm {farm_id} not found")
+
+    # Get latest NDVI
+    latest_vh = (
+        db.query(VegetationHealth)
+        .filter(VegetationHealth.farm_id == farm_id, VegetationHealth.ndvi.isnot(None))
+        .order_by(desc(VegetationHealth.date))
+        .first()
+    )
+
+    ndvi_mean = latest_vh.ndvi if latest_vh else None
+    area_ha = farm.area or farm.size_hectares or 1.0
+
+    crop_key = (farm.crop_type or "default").lower().strip()
+    factor = CROP_YIELD_FACTORS.get(crop_key, CROP_YIELD_FACTORS["default"])
+
+    # Zone-level estimates
+    zones = (
+        db.query(ProductivityZone)
+        .filter(ProductivityZone.farm_id == farm_id)
+        .order_by(desc(ProductivityZone.computed_at))
+        .all()
+    )
+
+    zone_estimates = []
+    total_yield_kg = 0.0
+    for z in zones:
+        z_ndvi = z.mean_ndvi or (ndvi_mean or 0.35)
+        z_area = z.area_ha or (area_ha / max(len(zones), 1))
+        z_yield_tha = round(z_ndvi * factor, 2)
+        z_total_kg = round(z_yield_tha * z_area * 1000, 1)
+        total_yield_kg += z_total_kg
+        zone_estimates.append({
+            "zone_class": z.zone_class,
+            "mean_ndvi": round(z_ndvi, 4),
+            "area_ha": round(z_area, 2),
+            "estimated_yield_tha": z_yield_tha,
+            "estimated_total_kg": z_total_kg,
+        })
+
+    # Farm-level estimate
+    overall_ndvi = ndvi_mean or 0.35
+    farm_yield_tha = round(overall_ndvi * factor, 2)
+    farm_total_kg = round(farm_yield_tha * area_ha * 1000, 1) if not zone_estimates else round(total_yield_kg, 1)
+
+    return {
+        "farm_id": farm_id,
+        "crop_type": farm.crop_type or "unknown",
+        "area_ha": round(area_ha, 2),
+        "ndvi_mean": round(overall_ndvi, 4) if overall_ndvi else None,
+        "ndvi_date": latest_vh.date.isoformat() if latest_vh and latest_vh.date else None,
+        "yield_factor": factor,
+        "estimated_yield_tha": farm_yield_tha,
+        "estimated_total_kg": farm_total_kg,
+        "zone_estimates": zone_estimates,
+        "method": "ndvi_linear",
+        "confidence": "moderate" if ndvi_mean and zones else "low",
+    }

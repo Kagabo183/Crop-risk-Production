@@ -519,6 +519,36 @@ def save_farm_boundary(
         )
 
 
+@router.post("/{farm_id}/quick-scan")
+def quick_scan_farm(
+    farm_id: int,
+    days_back: int = 30,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Fast synchronous vegetation scan via GEE reduceRegion().
+    Returns JSON with all vegetation indices in < 3 seconds.
+    No Celery, no raster downloads.
+    """
+    db_farm = db.query(FarmModel).filter(FarmModel.id == farm_id).first()
+    if not db_farm:
+        raise HTTPException(status_code=404, detail="Farm not found")
+    if current_user.role == "farmer" and db_farm.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your farm")
+    if not db_farm.latitude and not db_farm.boundary:
+        raise HTTPException(status_code=400, detail="Farm must have coordinates or boundary")
+
+    from app.services.fast_vegetation_service import quick_scan
+    try:
+        result = quick_scan(farm_id, db, days_back=days_back)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return result
+
+
 @router.post("/{farm_id}/auto-fetch-satellite")
 def auto_fetch_satellite(
     farm_id: int,

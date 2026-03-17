@@ -198,8 +198,7 @@ def calculate_area_hectares(boundary_geojson: Dict) -> float:
     """
     Calculate area of a boundary in hectares using geodesic calculation.
 
-    Uses proper geodesic area calculation for accurate results on Earth's surface.
-    Suitable for small to medium farms (< 1000 ha) in Rwanda.
+    Uses pyproj.Geod for accurate geodesic area on WGS84 ellipsoid.
 
     Args:
         boundary_geojson: GeoJSON geometry (Polygon or MultiPolygon)
@@ -208,42 +207,25 @@ def calculate_area_hectares(boundary_geojson: Dict) -> float:
         Area in hectares
     """
     try:
-        from math import radians, cos, sin
-
+        from pyproj import Geod
         polygon = shape(boundary_geojson)
-
-        # Get coordinates (handle both Polygon and MultiPolygon)
-        if polygon.geom_type == 'Polygon':
-            coords = list(polygon.exterior.coords)
-        elif polygon.geom_type == 'MultiPolygon':
-            # Sum area of all polygons
-            total_area = 0.0
-            for poly in polygon.geoms:
-                coords = list(poly.exterior.coords)
-                total_area += _calculate_polygon_area_geodesic(coords)
-            return round(total_area / 10000, 3)  # Convert m² to hectares
-        else:
-            return 0.0
-
-        # Calculate area using geodesic method
-        area_m2 = _calculate_polygon_area_geodesic(coords)
-        area_ha = area_m2 / 10000  # Convert to hectares
-
-        return round(area_ha, 3)
+        geod = Geod(ellps="WGS84")
+        area_m2, _ = geod.geometry_area_perimeter(polygon)
+        return round(abs(area_m2) / 10000, 3)
 
     except Exception as e:
         # Fallback to simple approximation if geodesic calculation fails
         try:
             polygon = shape(boundary_geojson)
             # Use a simple approximation for Rwanda (latitude around -2°)
-            # This is less accurate but more robust
             bounds = polygon.bounds  # (minx, miny, maxx, maxy)
             width_deg = bounds[2] - bounds[0]
             height_deg = bounds[3] - bounds[1]
 
-            # Approximate area using bounding box (very rough)
-            # 1 degree ≈ 111km at equator
-            area_m2_approx = (width_deg * 111320) * (height_deg * 111320) * 0.7  # 0.7 correction factor
+            # Approximate using bounding box with cosine correction at Rwanda latitude
+            from math import cos, radians
+            mid_lat = (bounds[1] + bounds[3]) / 2
+            area_m2_approx = (width_deg * 111320 * cos(radians(mid_lat))) * (height_deg * 111320) * 0.7
             return round(area_m2_approx / 10000, 3)
         except:
             return 0.0

@@ -1,12 +1,26 @@
 """
 API endpoint to get the latest satellite data (NDVI) for each farm
 """
+import math
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, date
 from pathlib import Path
+
+
+def _safe_float(v, decimals: int = 4):
+    """Return None for NaN/Inf values; otherwise round to `decimals` places."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return round(f, decimals)
+    except (TypeError, ValueError):
+        return None
 
 from geoalchemy2.shape import to_shape
 
@@ -79,15 +93,15 @@ def get_farms_with_satellite_data(
 
         if latest_metric:
             ndvi_value = latest_metric.ndvi_mean
-            source_ndvi = ndvi_value
+            source_ndvi = _safe_float(ndvi_value)
             if ndvi_value is not None:
-                farm_data["ndvi"] = round(ndvi_value, 4)
+                farm_data["ndvi"] = _safe_float(ndvi_value)
                 farm_data["ndvi_date"] = latest_metric.observation_date.isoformat()
                 farm_data["data_source"] = latest_metric.source or "sentinel2"
-                farm_data["cloud_cover"] = latest_metric.cloud_cover_percent
-                farm_data["ndre"] = round(latest_metric.ndre_mean, 4) if latest_metric.ndre_mean is not None else None
-                farm_data["evi"] = round(latest_metric.evi_mean, 4) if latest_metric.evi_mean is not None else None
-                farm_data["savi"] = round(latest_metric.savi_mean, 4) if latest_metric.savi_mean is not None else None
+                farm_data["cloud_cover"] = _safe_float(latest_metric.cloud_cover_percent)
+                farm_data["ndre"] = _safe_float(latest_metric.ndre_mean)
+                farm_data["evi"] = _safe_float(latest_metric.evi_mean)
+                farm_data["savi"] = _safe_float(latest_metric.savi_mean)
 
         elif latest_image:
             ndvi_value = latest_image.mean_ndvi
@@ -97,7 +111,7 @@ def get_farms_with_satellite_data(
                 ndvi_value = latest_image.extra_metadata.get('ndvi_value')
 
             if ndvi_value is not None:
-                farm_data["ndvi"] = round(ndvi_value, 4)
+                farm_data["ndvi"] = _safe_float(ndvi_value)
                 farm_data["ndvi_date"] = (
                     latest_image.acquisition_date.isoformat()
                     if latest_image.acquisition_date
@@ -105,17 +119,17 @@ def get_farms_with_satellite_data(
                 )
                 farm_data["image_type"] = latest_image.image_type
                 farm_data["data_source"] = latest_image.source or "unknown"
-                farm_data["cloud_cover"] = latest_image.cloud_cover_percent
+                farm_data["cloud_cover"] = _safe_float(latest_image.cloud_cover_percent)
 
                 # Include all vegetation indices
                 if latest_image.mean_ndre is not None:
-                    farm_data["ndre"] = round(latest_image.mean_ndre, 4)
+                    farm_data["ndre"] = _safe_float(latest_image.mean_ndre)
                 if latest_image.mean_ndwi is not None:
-                    farm_data["ndwi"] = round(latest_image.mean_ndwi, 4)
+                    farm_data["ndwi"] = _safe_float(latest_image.mean_ndwi)
                 if latest_image.mean_evi is not None:
-                    farm_data["evi"] = round(latest_image.mean_evi, 4)
+                    farm_data["evi"] = _safe_float(latest_image.mean_evi)
                 if latest_image.mean_savi is not None:
-                    farm_data["savi"] = round(latest_image.mean_savi, 4)
+                    farm_data["savi"] = _safe_float(latest_image.mean_savi)
 
         # Classify NDVI status
         if source_ndvi is not None:
@@ -134,20 +148,20 @@ def get_farms_with_satellite_data(
             .first()
         )
         if latest_veg_health:
-            farm_data["health_score"]  = latest_veg_health.health_score
+            farm_data["health_score"]  = _safe_float(latest_veg_health.health_score)
             farm_data["stress_level"]  = latest_veg_health.stress_level
             farm_data["stress_type"]   = latest_veg_health.stress_type
             # Fall back to stored VegetationHealth indices if SatelliteImage indices are null
             if farm_data["ndvi"] is None and latest_veg_health.ndvi is not None:
-                farm_data["ndvi"] = round(latest_veg_health.ndvi, 4)
+                farm_data["ndvi"] = _safe_float(latest_veg_health.ndvi)
             if farm_data["ndre"] is None and latest_veg_health.ndre is not None:
-                farm_data["ndre"] = round(latest_veg_health.ndre, 4)
+                farm_data["ndre"] = _safe_float(latest_veg_health.ndre)
             if farm_data["ndwi"] is None and latest_veg_health.ndwi is not None:
-                farm_data["ndwi"] = round(latest_veg_health.ndwi, 4)
+                farm_data["ndwi"] = _safe_float(latest_veg_health.ndwi)
             if farm_data["evi"] is None and latest_veg_health.evi is not None:
-                farm_data["evi"] = round(latest_veg_health.evi, 4)
+                farm_data["evi"] = _safe_float(latest_veg_health.evi)
             if farm_data["savi"] is None and latest_veg_health.savi is not None:
-                farm_data["savi"] = round(latest_veg_health.savi, 4)
+                farm_data["savi"] = _safe_float(latest_veg_health.savi)
             if farm_data["ndvi_date"] is None and latest_veg_health.date is not None:
                 farm_data["ndvi_date"] = latest_veg_health.date.isoformat()
 
@@ -197,15 +211,15 @@ def get_farm_ndvi_history(
     for row in metrics:
         history.append({
             "date": row.observation_date.isoformat(),
-            "ndvi": round(row.ndvi_mean, 4) if row.ndvi_mean is not None else None,
-            "ndre": round(row.ndre_mean, 4) if row.ndre_mean is not None else None,
-            "evi": round(row.evi_mean, 4) if row.evi_mean is not None else None,
-            "savi": round(row.savi_mean, 4) if row.savi_mean is not None else None,
-            "ndvi_min": row.ndvi_min,
-            "ndvi_max": row.ndvi_max,
-            "ndvi_std": row.ndvi_std,
-            "cloud_cover": row.cloud_cover_percent,
-            "health_score": row.health_score,
+            "ndvi": _safe_float(row.ndvi_mean),
+            "ndre": _safe_float(row.ndre_mean),
+            "evi": _safe_float(row.evi_mean),
+            "savi": _safe_float(row.savi_mean),
+            "ndvi_min": _safe_float(row.ndvi_min),
+            "ndvi_max": _safe_float(row.ndvi_max),
+            "ndvi_std": _safe_float(row.ndvi_std),
+            "cloud_cover": _safe_float(row.cloud_cover_percent),
+            "health_score": _safe_float(row.health_score),
         })
 
     # Return chronologically
@@ -239,15 +253,15 @@ def get_farm_metric_series(
     for row in metrics:
         history.append({
             "date": row.observation_date.isoformat(),
-            "ndvi_mean": row.ndvi_mean,
-            "ndvi_min": row.ndvi_min,
-            "ndvi_max": row.ndvi_max,
-            "ndvi_std": row.ndvi_std,
-            "ndre_mean": row.ndre_mean,
-            "evi_mean": row.evi_mean,
-            "savi_mean": row.savi_mean,
-            "cloud_cover_percent": row.cloud_cover_percent,
-            "health_score": row.health_score,
+            "ndvi_mean": _safe_float(row.ndvi_mean),
+            "ndvi_min": _safe_float(row.ndvi_min),
+            "ndvi_max": _safe_float(row.ndvi_max),
+            "ndvi_std": _safe_float(row.ndvi_std),
+            "ndre_mean": _safe_float(row.ndre_mean),
+            "evi_mean": _safe_float(row.evi_mean),
+            "savi_mean": _safe_float(row.savi_mean),
+            "cloud_cover_percent": _safe_float(row.cloud_cover_percent),
+            "health_score": _safe_float(row.health_score),
             "source": row.source,
         })
 

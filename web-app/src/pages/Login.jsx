@@ -57,17 +57,14 @@ export default function Login() {
                     </div>
 
                     <div className="auth-field">
-                        <label htmlFor="pin">5-Digit PIN</label>
+                        <label htmlFor="pin">Password / PIN</label>
                         <div className="password-wrapper">
                             <input
                                 id="pin"
                                 type={showPassword ? 'text' : 'password'}
                                 value={pin}
                                 onChange={(e) => setPin(e.target.value)}
-                                placeholder="•••••"
-                                pattern="\d{5}"
-                                maxLength="5"
-                                inputMode="numeric"
+                                placeholder="Enter your password"
                                 required
                             />
                             <button

@@ -25,11 +25,11 @@ export default function Register() {
         setError('')
 
         if (form.pin !== form.confirmPin) {
-            setError('PINs do not match')
+            setError('Passwords do not match')
             return
         }
-        if (form.pin.length !== 5 || !/^\d{5}$/.test(form.pin)) {
-            setError('Password must be exactly 5 digits')
+        if (form.pin.length < 4) {
+            setError('Password must be at least 4 characters')
             return
         }
 
@@ -90,22 +90,22 @@ export default function Register() {
 
                     <div className="auth-row">
                         <div className="auth-field">
-                            <label htmlFor="pin">5-Digit PIN</label>
+                            <label htmlFor="pin">Password</label>
                             <div className="password-wrapper">
                                 <input id="pin" name="pin" type={showPassword ? 'text' : 'password'} value={form.pin}
-                                    onChange={handleChange} placeholder="5 digits"
-                                    pattern="\d{5}" maxLength="5" inputMode="numeric" required />
+                                    onChange={handleChange} placeholder="Enter password"
+                                    required />
                                 <button type="button" className="password-toggle" onClick={() => setShowPassword(!showPassword)} tabIndex={-1}>
                                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                 </button>
                             </div>
                         </div>
                         <div className="auth-field">
-                            <label htmlFor="confirmPin">Confirm PIN</label>
+                            <label htmlFor="confirmPin">Confirm Password</label>
                             <div className="password-wrapper">
                                 <input id="confirmPin" name="confirmPin" type={showConfirm ? 'text' : 'password'}
-                                    value={form.confirmPin} onChange={handleChange} placeholder="Repeat PIN"
-                                    pattern="\d{5}" maxLength="5" inputMode="numeric" required />
+                                    value={form.confirmPin} onChange={handleChange} placeholder="Repeat password"
+                                    required />
                                 <button type="button" className="password-toggle" onClick={() => setShowConfirm(!showConfirm)} tabIndex={-1}>
                                     {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                                 </button>

@@ -248,6 +248,7 @@ class ProductivityZoneService:
     def _persist_zones(self, farm_id: int, zones: List[Dict], db: Session) -> None:
         for zone in zones:
             boundary_wkb = None
+            area_ha = None
             if zone.get("boundary"):
                 try:
                     from geoalchemy2.shape import from_shape
@@ -255,6 +256,14 @@ class ProductivityZoneService:
                     s = shapely_shape(zone["boundary"])
                     if not s.is_empty:
                         boundary_wkb = from_shape(s, srid=4326)
+                        # Compute area using pyproj geodesic calculation
+                        try:
+                            from pyproj import Geod
+                            geod = Geod(ellps="WGS84")
+                            abs_area, _ = geod.geometry_area_perimeter(s)
+                            area_ha = abs(abs_area) / 10000.0
+                        except Exception:
+                            pass
                 except Exception as exc:
                     logger.debug("Could not encode zone boundary: %s", exc)
 
@@ -266,6 +275,7 @@ class ProductivityZoneService:
                     mean_ndvi=zone["mean_ndvi"],
                     zone_index=zone["zone_index"],
                     color_hex=zone["color_hex"],
+                    area_ha=round(area_ha, 3) if area_ha else None,
                     computed_at=datetime.utcnow(),
                 )
             )

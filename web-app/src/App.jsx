@@ -69,8 +69,18 @@ function AppRoutes() {
   }
 
   return (
-    <WebLayout titles={PAGE_TITLES} apiStatus={apiStatus}>
-      <Routes>
+    <Routes>
+      {/* Full-screen route — no WebLayout wrapper */}
+      <Route path="/satellite-dashboard" element={
+        <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
+          <SatelliteDashboard />
+        </ProtectedRoute>
+      } />
+
+      {/* All other routes use the WebLayout shell */}
+      <Route path="*" element={
+        <WebLayout titles={PAGE_TITLES} apiStatus={apiStatus}>
+          <Routes>
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/farms" element={
           <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
@@ -116,11 +126,6 @@ function AppRoutes() {
             <MLModels />
           </ProtectedRoute>
         } />
-        <Route path="/satellite-dashboard" element={
-          <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
-            <SatelliteDashboard />
-          </ProtectedRoute>
-        } />
         <Route path="/seasons" element={
           <ProtectedRoute roles={['admin', 'agronomist', 'farmer']}>
             <SeasonManager />
@@ -142,8 +147,10 @@ function AppRoutes() {
         <Route path="/more" element={<Navigate to="/profile" replace />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/register" element={<Navigate to="/" replace />} />
-      </Routes>
-    </WebLayout>
+          </Routes>
+        </WebLayout>
+      } />
+    </Routes>
   )
 }
 
