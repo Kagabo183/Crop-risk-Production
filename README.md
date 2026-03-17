@@ -331,7 +331,7 @@ This is the central farm registry. Every downstream analysis (satellite, disease
 
 **URL:** `/satellite-dashboard` | **Roles:** Admin, Agronomist
 
-The most feature-rich page — an interactive Leaflet map with multi-layer satellite overlays and AI-powered field intelligence.
+The most feature-rich page — an interactive Mapbox satellite map with multi-layer index overlays, AI-powered field intelligence, and precision agriculture tools.
 
 **Map Layers (toggle via layer panel):**
 | Layer | Source | Description |
@@ -360,14 +360,30 @@ The most feature-rich page — an interactive Leaflet map with multi-layer satel
   - ✅ Landsat 9 (30 m — fallback)
 - Fusion confidence score and cloud cover percentage.
 
-**Field Scouting Panel:**
-- Click any point on the map to drop a scouting marker.
-- Fill in observations (pest seen, disease symptoms, crop damage).
-- Saved to the backend and linked to the nearest farm.
+**Field Intelligence Panel:**
+
+Click any farm to open a tabbed side-panel with deep analytics:
+
+| Tab | Content |
+|-----|--------|
+| **Status** | NDVI, weather, composite health score, actionable insights, productivity zone summary |
+| **Vegetation** | 90-day NDVI / NDRE / EVI / NDWI time-series chart |
+| **Yield Analysis** | NDVI-based yield estimation with zone breakdown |
+| **Prescription maps** | List existing VRA maps • Create new OneSoil-style VRA map • View full-screen result |
+
+Quick-action toolbar provides one-click access to:
+- **Scan** — trigger a new satellite analysis
+- **Prescription map** — open the OneSoil-style VRA creator (see VRA Maps below)
+- **Soil sampling** — generate grid- or zone-based sampling plans
+
+**Productivity Zone Overlays:**
+- After scanning, coloured polygon overlays appear on the map: green (high), amber (medium), red (low).
+- Hover to see a tooltip with zone label, mean NDVI, and area (ha).
+- Zones are computed from GEE Sentinel-2 imagery using K-means clustering.
 
 **Usage tips:**
 - Use the **farm selector** dropdown to zoom to a specific farm.
-- On a phone, pinch-to-zoom works on the Leaflet map.
+- On a phone, pinch-to-zoom works on the map.
 - Click any farm polygon to open a pop-up with current health stats.
 
 ---
@@ -545,27 +561,49 @@ Plan and track crop seasons and rotation schedules at the farm level.
 
 ### VRA Maps
 
-**URL:** `/vra` | **Roles:** Admin, Agronomist
+**URL:** Satellite Map → Field Intelligence Panel → **Prescription maps** tab | **Roles:** Admin, Agronomist
 
-Variable Rate Application (VRA) prescription maps for precision input management.
+Variable Rate Application (VRA) prescription maps for precision input management, designed with an **OneSoil-style** professional workflow.
 
 **What are VRA Maps?**
-VRA maps divide a field into zones and assign different input rates (fertiliser, water, pesticide) to each zone based on satellite-derived productivity differences. This reduces input waste and targets underperforming areas.
+VRA maps divide a field into productivity zones and assign different input rates (fertiliser, seed, pesticide) to each zone based on satellite-derived productivity differences. This reduces input waste, cuts costs, and targets underperforming areas.
 
-**How to generate a VRA map:**
-1. Select a farm with an active season.
-2. Choose the **input type**: Fertilisation / Irrigation / Pesticide Application.
-3. Set the number of **productivity zones** (2–5; default 3).
-4. Click **Generate Map** — the backend runs K-means clustering on the latest multi-index composite.
-5. The map appears as a colour-coded Leaflet overlay:
-   - 🟥 Low productivity zone — increased input rate
-   - 🟨 Medium productivity zone — standard rate
-   - 🟩 High productivity zone — reduced rate
-6. Each zone shows: area (ha), recommended input rate, zone index stats.
+**Creating a VRA map (OneSoil-style modal):**
+1. Open the Satellite Map, click a farm to reveal the Field Intelligence Panel.
+2. Click **"Prescription map"** in the toolbar, or switch to the **Prescription maps** tab and click **"+ Create VRA map"**.
+3. A white modal opens with two steps:
+   - **Step 1** — Select prescription type: Planting • Crop protection • Fertiliser application • Multiple inputs.
+   - **Step 2** — Select data source: Productivity map (auto-computed from GEE) • Recent NDVI image • Soil analysis results.
+4. Click **"Create map"** — the backend generates a zone-based prescription.
+
+**VRA Result View (full-screen split-screen):**
+
+After creation, a full-screen overlay appears with three panels:
+
+| Panel | Content |
+|-------|--------|
+| **Left sidebar** (280 px) | Map settings, prescription settings (crop, variety, rate, unit), zone rate table with colour bars, Invert rates toggle, Trial mode toggle, Save + Export buttons |
+| **Centre map** | Mapbox satellite with VRA zone overlays in purple shades (deep purple = high productivity, light purple = low), hover tooltips with rate and area |
+| **Right map** | Mapbox satellite with productivity zone overlays (green/amber/red) for side-by-side comparison with the prescription |
+
+**Zone rate logic:**
+| Zone | Productivity | Default multiplier | Example (100 kg/ha base) |
+|------|-------------|--------------------|--------------------------|
+| High | Strong NDVI | 0.8× (reduce) | 80 kg/ha |
+| Medium | Average | 1.0× (standard) | 100 kg/ha |
+| Low | Weak NDVI | 1.2× (increase) | 120 kg/ha |
+
+Rates are fully editable; toggle **Invert rates** for seeding where more seed goes to the productive zones.
+
+**Viewing existing VRA maps:**
+- The **Prescription maps** tab lists all previously created maps for the farm.
+- Each card shows: type icon, product, base rate, zone breakdown, and savings %.
+- Click a card to re-open the full-screen VRA Result View.
 
 **Exporting a prescription:**
-- Click **Export PDF** for a printable field prescription.
-- Click **Export GeoJSON** for use with precision agriculture equipment.
+- Click **Export** in the sidebar to download as:
+  - **GeoJSON** — for use with precision agriculture equipment.
+  - **ISOXML** — ISO 11783 format for compatible variable-rate controllers.
 
 ---
 

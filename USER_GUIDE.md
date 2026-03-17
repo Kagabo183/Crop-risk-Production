@@ -268,7 +268,7 @@ Click **Details** on a farm card to open its detail view. Tabs inside include:
 
 **URL:** `/satellite-dashboard`
 
-The main interactive map for visual exploration.
+The main interactive map — a Mapbox satellite-powered workspace for visual exploration, field intelligence, and precision agriculture.
 
 **What you can do:**
 
@@ -295,6 +295,34 @@ The main interactive map for visual exploration.
 - **Orange markers** — Moderate (NDVI 0.4–0.59)
 - **Red markers** — Stressed (NDVI < 0.4)
 - **Grey markers** — No data yet
+
+#### 7.1.1 Field Intelligence Panel
+
+Click a farm on the map to open the **Field Intelligence Panel** — a tabbed side-panel that provides deep analytics for the selected field.
+
+| Tab | What it shows |
+|-----|---------------|
+| **Status** | Current NDVI, weather, composite health score, actionable insights |
+| **Vegetation** | NDVI / NDRE / EVI / NDWI time-series chart (90 days) |
+| **Yield Analysis** | NDVI-based yield estimation + season comparison |
+| **Prescription maps** | List of existing VRA maps + "Create VRA map" button |
+
+**Quick-action toolbar** at the top of the panel provides one-click access to:
+- **Scan** — run a new satellite analysis for the farm.
+- **Prescription map** — open the OneSoil-style VRA map creator (see §9.2).
+- **Soil sampling** — generate a grid- or zone-based soil sampling plan.
+
+#### 7.1.2 Productivity Zone Overlays
+
+After scanning a farm (or once zones have been computed), **productivity zones** are rendered as coloured polygon overlays on the map:
+
+| Zone | Colour | Meaning |
+|------|--------|---------|
+| **High** | Green | Strong vegetation — reduce or maintain inputs |
+| **Medium** | Amber | Average productivity — standard input rate |
+| **Low** | Red | Weak vegetation — increase inputs or investigate |
+
+Hover over a zone to see a tooltip with the zone label, mean NDVI, and area in hectares. These zones are computed from GEE Sentinel-2 imagery using K-means clustering.
 
 ### 7.2 Satellite Data
 
@@ -416,20 +444,84 @@ At season end, record the **Actual Yield** to feed the yield analysis model.
 
 ### 9.2 VRA Maps (Variable Rate Application)
 
-**URL:** `/vra` *(admin / agronomist)*
+**URL:** Accessible from the **Satellite Map** → Field Intelligence Panel → **Prescription maps** tab, or via the **Prescription map** quick-action button.
 
-Generates spatial maps that guide precision application of inputs across a field, based on the latest satellite index data.
+VRA maps divide a field into productivity zones and assign different input rates (fertiliser, seed, pesticide) to each zone. This reduces input costs and targets underperforming areas. The interface follows the **OneSoil** design pattern — a professional precision-ag workflow.
 
-**Steps:**
+#### 9.2.1 Creating a VRA Map
 
-1. Select a farm from the dropdown.
-2. Choose the **Application Type**: Fertiliser, Pesticide, or Irrigation.
-3. Set **Zone threshold** (number of management zones, typically 3–5).
-4. Click **Generate Map**.
-5. The map renders management zones (red = high input, yellow = medium, green = low).
-6. Download the map as **GeoTIFF** for import into variable-rate machinery or as **PDF** for field reference.
+1. Open the Satellite Map and click the farm you want to manage.
+2. In the Field Intelligence Panel, click the **"Prescription map"** button (in the toolbar) or switch to the **Prescription maps** tab and click **"+ Create VRA map"**.
+3. The **Create VRA Map** modal opens with two steps:
 
-> The recommendation engine uses NDVI, soil adjusted indices, and the farm's historical yield data to compute zone boundaries.
+**Step 1 — Choose prescription type:**
+
+| Type | Icon | Typical unit |
+|------|------|--------------|
+| **Planting** | Sprout | seeds/ha |
+| **Crop protection** | Shield | L/ha |
+| **Fertiliser application** | Flask | kg/ha |
+| **Multiple inputs** | Layers | kg/ha *(coming soon)* |
+
+Click a card to select it (dark border highlights the active type).
+
+**Step 2 — Choose data source:**
+
+| Source | Description |
+|--------|-------------|
+| **Productivity map** | Uses K-means productivity zones computed from GEE satellite data. If zones have not been computed yet, the system auto-computes them (a spinner shows progress). |
+| **Recent NDVI image** | Uses the latest NDVI raster directly. |
+| **Soil analysis results** | Uses uploaded soil sample data. |
+
+4. Click the black **"Create map"** button.
+5. The backend generates a prescription with zone-specific rates and the **VRA Result View** opens automatically.
+
+#### 9.2.2 VRA Result View (Full-Screen)
+
+After creating or viewing a VRA map you enter a full-screen split-screen view with three panels:
+
+**Left — Settings Sidebar:**
+- **Map settings**: prescription type selector, data source, number of zones.
+- **Prescription settings**: crop name, variety, standard rate and unit.
+- **Zone rate table**: shows each zone (Zone 1 / 2 / 3) with a colour indicator, area percentage, and editable rate values.
+  - Zone colours: deep purple (high productivity), medium purple, light purple (low productivity).
+- **Invert rates** toggle: swap high/low zone rates.
+- **Trial mode** toggle: enable split-field test strips.
+- **Save** and **Export** buttons:
+  - **Save** — stores the prescription to the platform database.
+  - **Export** — download as GeoJSON (for precision equipment) or ISOXML.
+
+**Centre — VRA Zone Map:**
+- Full Mapbox satellite map showing the field with VRA zone polygons overlaid in purple shades.
+- Hover over a zone to see a tooltip with the zone label, recommended application rate, and area in hectares.
+- A legend at the bottom shows the zone colour scale.
+
+**Right — Productivity Map:**
+- A second Mapbox satellite map showing the underlying productivity zones used to generate the prescription.
+- Zone colours: green (high productivity), amber (medium), red (low).
+- Provides a visual comparison of the source data side-by-side with the generated prescription.
+
+#### 9.2.3 Viewing Existing VRA Maps
+
+In the **Prescription maps** tab of the Field Intelligence Panel:
+- All previously created VRA maps for the selected farm are listed as cards.
+- Each card shows: prescription type icon, product name, base rate, zone rate summary, and potential savings percentage.
+- Click any card to re-open the full-screen **VRA Result View** for that prescription.
+- Click **"+ Create VRA map"** to generate a new one.
+
+#### 9.2.4 Understanding Zone Rates
+
+The system divides the field into three productivity zones and assigns adjusted input rates:
+
+| Zone | Productivity | Default logic | Example (100 kg/ha base) |
+|------|-------------|---------------|-------------------------|
+| **High** | Strong vegetation | Reduce inputs (0.8× multiplier) | 80 kg/ha |
+| **Medium** | Average | Standard rate (1.0×) | 100 kg/ha |
+| **Low** | Weak vegetation | Increase inputs (1.2× multiplier) | 120 kg/ha |
+
+Rates are fully editable in the settings sidebar. The **Invert rates** toggle reverses the logic (e.g. for seeding where you want more seed in the productive zones).
+
+> **Tip:** After creating a VRA map, use the **Export** button to download a GeoJSON file that can be loaded directly into variable-rate application hardware.
 
 ### 9.3 Yield Analysis
 
