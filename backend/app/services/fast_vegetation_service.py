@@ -16,7 +16,7 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.data import FarmVegetationMetric
+from app.models.data import FarmVegetationMetric, SatelliteImage
 from app.models.farm import Farm
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,28 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
     metric.cloud_cover_percent = cloud_pct
     metric.health_score        = health
     metric.source              = "gee_quick_scan"
+
+    # Also create/update SatelliteImage record (used by early_warning, admin, etc.)
+    sat_img = (
+        db.query(SatelliteImage)
+        .filter(SatelliteImage.farm_id == farm_id, SatelliteImage.date == today)
+        .first()
+    )
+    if sat_img is None:
+        sat_img = SatelliteImage(
+            farm_id=farm_id,
+            date=today,
+            region=farm.location or "Unknown",
+            image_type="multispectral",
+            source="gee_quick_scan",
+            processing_status="completed",
+        )
+        db.add(sat_img)
+    sat_img.mean_ndvi = ndvi_mean
+    sat_img.mean_ndre = ndre_mean
+    sat_img.mean_evi  = evi_mean
+    sat_img.mean_savi = savi_mean
+    sat_img.cloud_cover_percent = cloud_pct
 
     db.commit()
     db.refresh(metric)

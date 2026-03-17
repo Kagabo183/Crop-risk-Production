@@ -12,12 +12,45 @@ from sqlalchemy import desc
 
 from app.db.database import get_db
 from app.models.farm import Farm
-from app.models.data import SatelliteImage, WeatherRecord
+from app.models.data import SatelliteImage, WeatherRecord, FarmVegetationMetric
 from app.core.auth import get_current_active_user
 from app.models.user import User as UserModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _fetch_realtime_weather(lat: float, lon: float) -> dict:
+    """Fetch current weather from Open-Meteo (free, no API key)."""
+    import requests as _requests
+    try:
+        resp = _requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current_weather": True,
+                "hourly": "relative_humidity_2m,precipitation",
+                "timezone": "auto",
+                "forecast_days": 1,
+            },
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        cw = data.get("current_weather", {})
+        hourly = data.get("hourly", {})
+        humidity_vals = hourly.get("relative_humidity_2m", [])
+        precip_vals = hourly.get("precipitation", [])
+        return {
+            "temperature": cw.get("temperature", 22),
+            "humidity": round(sum(humidity_vals) / max(len(humidity_vals), 1), 1) if humidity_vals else 70,
+            "rainfall": round(sum(precip_vals), 2) if precip_vals else 0,
+        }
+    except Exception as exc:
+        logger.warning("Open-Meteo realtime fetch failed: %s", exc)
+        return {"temperature": 22, "humidity": 72, "rainfall": 2}
+
 
 # Growth stages with disease susceptibility multiplier (1.0 = normal, higher = more susceptible)
 STAGE_SUSCEPTIBILITY = {
@@ -160,7 +193,7 @@ def get_early_warnings(
     alerts = []
 
     for farm in farms:
-        # 1. Get last 6 NDVI observations
+        # 1. Get last 6 NDVI observations (check both SatelliteImage and FarmVegetationMetric)
         sat_records = (
             db.query(SatelliteImage)
             .filter(SatelliteImage.farm_id == farm.id)
@@ -169,9 +202,23 @@ def get_early_warnings(
             .all()
         )
         ndvi_series = [s.mean_ndvi for s in reversed(sat_records) if s.mean_ndvi is not None]
+
+        # Fall back to FarmVegetationMetric (populated by quick_scan)
+        if len(ndvi_series) < 3:
+            veg_records = (
+                db.query(FarmVegetationMetric)
+                .filter(FarmVegetationMetric.farm_id == farm.id)
+                .order_by(desc(FarmVegetationMetric.observation_date))
+                .limit(6)
+                .all()
+            )
+            veg_ndvi = [v.ndvi_mean for v in reversed(veg_records) if v.ndvi_mean is not None]
+            if len(veg_ndvi) > len(ndvi_series):
+                ndvi_series = veg_ndvi
+
         ndvi_result = _ndvi_anomaly(ndvi_series)
 
-        # 2. Get latest weather (from extra_metadata or approximate)
+        # 2. Get latest weather (from DB or real-time Open-Meteo)
         weather_rec = (
             db.query(WeatherRecord)
             .filter(WeatherRecord.farm_id == farm.id)
@@ -182,11 +229,29 @@ def get_early_warnings(
         if weather_rec:
             weather = {
                 "temperature": weather_rec.temperature or 22,
-                "humidity": (weather_rec.extra_metadata or {}).get("humidity", 70),
+                "humidity": (weather_rec.extra_metadata or {}).get("humidity", weather_rec.humidity or 70),
                 "rainfall": weather_rec.rainfall or 0,
             }
+        elif farm.latitude and farm.longitude:
+            # Fetch real-time weather from Open-Meteo (free, no API key)
+            weather = _fetch_realtime_weather(farm.latitude, farm.longitude)
+            # Store for future queries
+            try:
+                new_rec = WeatherRecord(
+                    farm_id=farm.id,
+                    date=datetime.utcnow().date(),
+                    region=farm.location or f"Lat:{farm.latitude:.2f},Lon:{farm.longitude:.2f}",
+                    rainfall=weather.get("rainfall"),
+                    temperature=weather.get("temperature"),
+                    humidity=weather.get("humidity"),
+                    source="open-meteo-realtime",
+                    extra_metadata={"humidity": weather.get("humidity")},
+                )
+                db.add(new_rec)
+                db.commit()
+            except Exception:
+                db.rollback()
         else:
-            # Use climatological defaults for Rwanda
             weather = {"temperature": 22, "humidity": 72, "rainfall": 2}
 
         disease_risk = _weather_disease_risk(weather)
