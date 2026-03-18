@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
-from app.models.data import VegetationHealth, WeatherRecord, SatelliteImage
+from app.models.data import VegetationHealth, WeatherRecord, SatelliteImage, FarmVegetationMetric
 from app.models.farm import Farm
 from app.core.alert_messages import AlertMessageTemplates
 import logging
@@ -76,10 +76,17 @@ class StressDetectionService:
         if not veg_health:
             return {'score': 0, 'level': 'unknown', 'message': 'No vegetation data available'}
         
-        # Get latest NDVI and NDWI
+        # Get latest NDVI and NDWI (fall back to FarmVegetationMetric if VH has nulls)
         latest = veg_health[0]
-        current_ndvi = latest.ndvi   # Keep as None if not available
-        current_ndwi = latest.ndwi   # Keep as None if not available
+        current_ndvi = latest.ndvi
+        current_ndwi = latest.ndwi
+
+        if current_ndvi is None:
+            fvm = db.query(FarmVegetationMetric).filter(
+                FarmVegetationMetric.farm_id == farm_id
+            ).order_by(FarmVegetationMetric.observation_date.desc()).first()
+            if fvm and fvm.ndvi_mean is not None:
+                current_ndvi = fvm.ndvi_mean
         
         # Calculate NDVI trend
         if len(veg_health) >= 2:

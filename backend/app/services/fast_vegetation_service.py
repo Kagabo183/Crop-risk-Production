@@ -16,7 +16,7 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.data import FarmVegetationMetric, SatelliteImage
+from app.models.data import FarmVegetationMetric, SatelliteImage, VegetationHealth
 from app.models.farm import Farm
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,11 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
     L = 0.5
     savi = nir.subtract(red).divide(nir.add(red).add(L)).multiply(1 + L).rename("SAVI")
 
-    indices = ee.Image.cat([ndvi, ndre, evi, savi])
+    # NDWI: (Green - NIR) / (Green + NIR) — water content index
+    green = composite.select("B3").divide(sf)
+    ndwi = green.subtract(nir).divide(green.add(nir)).rename("NDWI")
+
+    indices = ee.Image.cat([ndvi, ndre, evi, savi, ndwi])
 
     # ── ONE single round-trip: stats + size + cloud cover ───────────────
     combined = ee.Dictionary({
@@ -173,6 +177,7 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
     ndre_mean = stats.get("NDRE_mean")
     evi_mean  = stats.get("EVI_mean")
     savi_mean = stats.get("SAVI_mean")
+    ndwi_mean = stats.get("NDWI_mean")
 
     health = _health_score(ndvi_mean, ndre_mean, evi_mean, savi_mean)
 
@@ -214,15 +219,34 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
             date=today,
             region=farm.location or "Unknown",
             image_type="multispectral",
+            file_path=f"gee_quick_scan/farm_{farm_id}/{today}",
             source="gee_quick_scan",
             processing_status="completed",
         )
         db.add(sat_img)
     sat_img.mean_ndvi = ndvi_mean
     sat_img.mean_ndre = ndre_mean
+    sat_img.mean_ndwi = ndwi_mean
     sat_img.mean_evi  = evi_mean
     sat_img.mean_savi = savi_mean
     sat_img.cloud_cover_percent = cloud_pct
+
+    # Also create/update VegetationHealth record (used by stress monitoring)
+    vh = (
+        db.query(VegetationHealth)
+        .filter(VegetationHealth.farm_id == farm_id, VegetationHealth.date == today)
+        .first()
+    )
+    if vh is None:
+        vh = VegetationHealth(farm_id=farm_id, date=today)
+        db.add(vh)
+    vh.ndvi = ndvi_mean
+    vh.ndre = ndre_mean
+    vh.ndwi = ndwi_mean
+    vh.evi  = evi_mean
+    vh.savi = savi_mean
+    vh.health_score = health
+    vh.stress_level = "low" if health >= 60 else ("moderate" if health >= 35 else "high")
 
     db.commit()
     db.refresh(metric)
@@ -239,6 +263,7 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
         "ndre_mean":           _round(ndre_mean),
         "evi_mean":            _round(evi_mean),
         "savi_mean":           _round(savi_mean),
+        "ndwi_mean":           _round(ndwi_mean),
         "cloud_cover_percent": _round(cloud_pct),
         "health_score":        health,
         "source":              "gee_quick_scan",
