@@ -237,7 +237,7 @@ export default function EarlyWarning() {
                   <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 6 }}>{a.crop_type}</span>
                 </div>
                 <span className={`badge ${a.alert_level === 'low' ? 'healthy' : a.alert_level}`}>
-                  {a.alert_level} {a.combined_score}%
+                  {a.alert_level.charAt(0).toUpperCase() + a.alert_level.slice(1)} — {a.combined_score}%
                 </span>
               </div>
 

@@ -220,7 +220,7 @@ export default function Farms() {
               ) : (
                 farmsWithSatellite.map(farm => {
                   const sat = satProgress[farm.id]
-                  const { status: healthStatus, score } = calculateHealthScore({ ndvi: farm.ndvi, ndre: farm.ndre })
+                  const { status: healthStatus, label: healthLabel, score } = calculateHealthScore(farm)
                   return (
                     <tr key={farm.id}>
                       <td style={{ fontWeight: 600 }}>{farm.name}</td>
@@ -237,7 +237,7 @@ export default function Farms() {
                           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <span style={{ fontWeight: 600 }}>{farm.ndvi.toFixed(3)}</span>
                             <span className={`badge ${healthStatus}`}>
-                              {healthStatus === 'unknown' ? 'No data' : `${score ?? '—'}%`}
+                              {healthStatus === 'unknown' ? 'No data' : healthLabel}
                             </span>
                           </div>
                         ) : '—'}

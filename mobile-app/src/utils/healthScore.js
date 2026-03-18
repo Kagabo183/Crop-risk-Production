@@ -9,6 +9,17 @@
 export function calculateHealthScore(sat) {
     if (!sat) return { score: null, status: 'unknown', label: 'No data' }
 
+    // Use pre-computed health_score from VegetationHealth if available (matches web behaviour)
+    if (sat.health_score != null) {
+        const score = sat.health_score
+        const sl = sat.stress_level
+        if (sl === 'severe' || sl === 'high' || score < 40)
+            return { score, status: 'high', label: 'Stressed' }
+        if (sl === 'moderate' || score < 70)
+            return { score, status: 'moderate', label: 'Moderate' }
+        return { score, status: 'healthy', label: 'Healthy' }
+    }
+
     const ndvi = sat.ndvi
     const ndre = sat.ndre
     const ndwi = sat.ndwi

@@ -732,7 +732,7 @@ export default function Farms() {
                     <tr><td colSpan="7" style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>No farms registered yet.</td></tr>
                   ) : farms.map(farm => {
                     const sat = satellite.find(s => s.id === farm.id)
-                    const { status: healthStatus, score } = calculateHealthScore(sat)
+                    const { status: healthStatus, score, label: healthLabel } = calculateHealthScore(sat)
                     return (
                       <tr key={farm.id}>
                         <td style={{ fontWeight: 600 }}>{farm.name}</td>
@@ -749,7 +749,7 @@ export default function Farms() {
                         <td>{farm.size_hectares || farm.area || '—'}</td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className={`badge ${healthStatus}`}>{healthStatus}</span>
+                            <span className={`badge ${healthStatus}`}>{healthLabel}</span>
                             {score != null && <span style={{ opacity: 0.6, fontSize: 10 }}>{Math.round(score)}%</span>}
                           </div>
                         </td>
@@ -785,7 +785,7 @@ export default function Farms() {
             const hasCoords = farm.latitude && farm.longitude
 
             // ── Composite Health Score (shared utility) ──
-            const { status: healthStatus } = calculateHealthScore(sat)
+            const { status: healthStatus, label: healthLabel } = calculateHealthScore(sat)
             const progress = satProgress[farm.id]
 
             return (
@@ -794,7 +794,7 @@ export default function Farms() {
                   <h3>{farm.name}</h3>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <span className={`badge ${healthStatus}`}>
-                      {healthStatus === 'unknown' ? 'No data' : healthStatus}
+                      {healthStatus === 'unknown' ? 'No data' : healthLabel}
                     </span>
                     <button
                       className="btn btn-secondary"

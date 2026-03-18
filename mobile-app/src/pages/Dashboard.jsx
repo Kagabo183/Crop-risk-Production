@@ -399,7 +399,7 @@ export default function Dashboard() {
               {farms.map(farm => {
                 const sat = satellite.find(s => s.id === farm.id)
                 const ndvi = sat?.ndvi
-                const { status } = calculateHealthScore(sat)
+                const { status, label: healthLabel } = calculateHealthScore(sat)
 
                 return (
                   <div key={farm.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
@@ -411,7 +411,7 @@ export default function Dashboard() {
                     </div>
                     {ndvi != null && <span style={{ fontSize: 12, fontWeight: 600, color: ndvi >= 0.6 ? 'var(--success)' : ndvi >= 0.4 ? 'var(--warning)' : 'var(--danger)' }}>{ndvi.toFixed(2)}</span>}
                     <span className={`badge ${status}`}>
-                      {status === 'unknown' ? 'No data' : status === 'healthy' ? 'Good' : status === 'moderate' ? 'Watch' : 'Alert'}
+                      {status === 'unknown' ? 'No data' : healthLabel}
                     </span>
                   </div>
                 )
