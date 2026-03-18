@@ -163,6 +163,9 @@ class NdviTileService:
         ).getInfo()
         mean_val = float(mean_dict.get("result") or 0.3)
 
+        # Clip to farm geometry so only the farm area is rendered (remove full-scene cloud haze)
+        index_image = index_image.clip(farm_geom)
+
         # Tile URL with per-index vis params
         vis = INDEX_VIS.get(index, INDEX_VIS["NDVI"])
         map_id    = index_image.getMapId(vis)

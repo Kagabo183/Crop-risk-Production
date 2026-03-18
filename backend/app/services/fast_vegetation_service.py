@@ -201,6 +201,7 @@ def quick_scan(farm_id: int, db: Session, days_back: int = 30) -> dict:
     metric.ndvi_max            = ndvi_max
     metric.ndvi_std            = ndvi_std
     metric.ndre_mean           = ndre_mean
+    metric.ndwi_mean           = ndwi_mean
     metric.evi_mean            = evi_mean
     metric.savi_mean           = savi_mean
     metric.cloud_cover_percent = cloud_pct

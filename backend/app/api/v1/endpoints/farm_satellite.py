@@ -100,7 +100,7 @@ def get_farms_with_satellite_data(
                 farm_data["data_source"] = latest_metric.source or "sentinel2"
                 farm_data["cloud_cover"] = _safe_float(latest_metric.cloud_cover_percent)
                 farm_data["ndre"] = _safe_float(latest_metric.ndre_mean)
-                farm_data["ndwi"] = _safe_float(latest_metric.ndwi_mean)
+                farm_data["ndwi"] = _safe_float(getattr(latest_metric, 'ndwi_mean', None))
                 farm_data["evi"] = _safe_float(latest_metric.evi_mean)
                 farm_data["savi"] = _safe_float(latest_metric.savi_mean)
 

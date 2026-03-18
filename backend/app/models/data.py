@@ -16,6 +16,7 @@ class FarmVegetationMetric(Base):
     ndvi_max = Column(Float, nullable=True)
     ndvi_std = Column(Float, nullable=True)
     ndre_mean = Column(Float, nullable=True)
+    ndwi_mean = Column(Float, nullable=True)
     evi_mean = Column(Float, nullable=True)
     savi_mean = Column(Float, nullable=True)
 
