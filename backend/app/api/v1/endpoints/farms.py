@@ -640,3 +640,121 @@ def detect_location(
         "source": result['source'],
         "message": f"Detected: {result['district']}, {result['province']}"
     }
+
+
+@router.post("/refresh-all")
+def refresh_all_farms(
+    days_back: int = 30,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(require_farmer_or_above),
+):
+    """
+    Bulk-refresh satellite indices + weather for all farms accessible to the current user.
+
+    - Farmer: refreshes only their own farms.
+    - Agronomist/Admin: refreshes all farms in the platform.
+
+    For each farm with coordinates:
+      1. Enqueues a Celery satellite-processing task (async, non-blocking).
+      2. Fetches real-time weather from Open-Meteo and persists a WeatherRecord.
+
+    Returns 202 immediately with queued task count.
+    """
+    from datetime import datetime, timedelta
+    from app.models.data import WeatherRecord
+    from sqlalchemy import desc
+
+    # Scope to accessible farms
+    query = db.query(FarmModel)
+    if current_user.role == "farmer":
+        query = query.filter(FarmModel.owner_id == current_user.id)
+    elif current_user.role == "agronomist" and current_user.district:
+        query = query.filter(FarmModel.location == current_user.district)
+    farms = query.all()
+
+    if not farms:
+        raise HTTPException(status_code=404, detail="No farms found")
+
+    task_ids = []
+    weather_updated = 0
+    no_coords = []
+
+    for farm in farms:
+        if not farm.latitude or not farm.longitude:
+            no_coords.append({"farm_id": farm.id, "name": farm.name})
+            continue
+
+        # 1. Enqueue satellite scan
+        try:
+            task = process_single_farm.delay(farm.id, days_back)
+            task_ids.append(task.id)
+        except Exception as e:
+            pass  # Celery unavailable – skip but continue weather
+
+        # 2. Fetch weather from Open-Meteo and persist (skip if fresh record exists today)
+        today = datetime.utcnow().date()
+        existing_weather = (
+            db.query(WeatherRecord)
+            .filter(WeatherRecord.farm_id == farm.id, WeatherRecord.date == today)
+            .first()
+        )
+        if not existing_weather:
+            try:
+                import requests as _req
+                resp = _req.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": farm.latitude,
+                        "longitude": farm.longitude,
+                        "current_weather": True,
+                        "hourly": "relative_humidity_2m,precipitation",
+                        "timezone": "auto",
+                        "forecast_days": 1,
+                    },
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                d = resp.json()
+                cw = d.get("current_weather", {})
+                hourly = d.get("hourly", {})
+                humidity_vals = hourly.get("relative_humidity_2m", [])
+                precip_vals = hourly.get("precipitation", [])
+                temperature = cw.get("temperature", 22)
+                humidity = round(sum(humidity_vals) / max(len(humidity_vals), 1), 1) if humidity_vals else 70
+                rainfall = round(sum(precip_vals), 2) if precip_vals else 0
+
+                new_rec = WeatherRecord(
+                    farm_id=farm.id,
+                    date=today,
+                    region=farm.location or f"Lat:{farm.latitude:.2f},Lon:{farm.longitude:.2f}",
+                    rainfall=rainfall,
+                    temperature=temperature,
+                    humidity=humidity,
+                    source="open-meteo-refresh-all",
+                    extra_metadata={"humidity": humidity},
+                )
+                db.add(new_rec)
+                weather_updated += 1
+            except Exception:
+                pass
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    from starlette.responses import JSONResponse
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "accepted",
+            "message": (
+                f"Satellite scan queued for {len(task_ids)} farm(s). "
+                f"Weather refreshed for {weather_updated} farm(s)."
+            ),
+            "satellite_tasks_queued": len(task_ids),
+            "weather_updated": weather_updated,
+            "farms_without_coords": no_coords,
+            "task_ids": task_ids,
+        },
+    )

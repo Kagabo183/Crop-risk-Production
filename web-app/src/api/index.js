@@ -157,6 +157,8 @@ export const getFarmPredictions = (farmId, limit = 10) =>
 // ── Early Warning ──
 export const getEarlyWarnings = () => api.get('/early-warning/')
 export const fetchWeatherAll = () => api.post('/early-warning/fetch-weather')
+export const refreshAllFarms = (daysBack = 30) =>
+  api.post('/farms/refresh-all', null, { params: { days_back: daysBack }, timeout: 60000 })
 export const getWeatherForecast = (lat, lon, days = 7) =>
   api.get('/weather/forecast', { params: { lat, lon, days } })
 

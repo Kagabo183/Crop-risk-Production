@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { usePlatform } from '../context/PlatformContext'
-import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock } from 'lucide-react'
-import { getEarlyWarnings, fetchWeatherAll } from '../api'
-import { useFarmDataListener } from '../utils/farmEvents'
+import { AlertTriangle, Shield, CloudRain, Sprout, RefreshCw, Clock, Info, Zap } from 'lucide-react'
+import { getEarlyWarnings, fetchWeatherAll, refreshAllFarms } from '../api'
+import { useFarmDataListener, emitFarmDataUpdated } from '../utils/farmEvents'
 
 const LEVEL_COLORS = { critical: '#dc2626', high: '#ea580c', moderate: '#d97706', low: '#16a34a' }
 const LEVEL_LABELS = { critical: 'Critical', high: 'High', moderate: 'Moderate', low: 'Low' }
@@ -12,6 +12,9 @@ export default function EarlyWarning() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [fetching, setFetching] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshResult, setRefreshResult] = useState(null)
+  const [showDataInfo, setShowDataInfo] = useState(false)
   const [error, setError] = useState(null)
 
   const load = () => {
@@ -38,10 +41,26 @@ export default function EarlyWarning() {
     setFetching(false)
   }
 
+  const handleRefreshAll = async () => {
+    setRefreshing(true)
+    setRefreshResult(null)
+    setError(null)
+    try {
+      const r = await refreshAllFarms(30)
+      setRefreshResult(r.data)
+      emitFarmDataUpdated(null)   // tell all open pages data is incoming
+      setTimeout(load, 4000)     // reload alerts after tasks have a moment to start
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Refresh failed — ensure farms have coordinates set.')
+    }
+    setRefreshing(false)
+  }
+
   if (loading) return <div className="loading"><div className="spinner" /><p>Analyzing farm conditions...</p></div>
 
   const alerts = data?.alerts || []
   const summary = data?.summary || {}
+  const insufficientCount = alerts.filter(a => a.ndvi_anomaly?.trend === 'insufficient_data').length
 
   const chartData = alerts.slice(0, 15).map(a => ({
     name: (a.farm_name || `Farm ${a.farm_id}`).substring(0, 12),
@@ -60,9 +79,28 @@ export default function EarlyWarning() {
               Weather + NDVI anomaly + growth stage analysis
             </p>
           </div>
-          <button className="btn btn-sm btn-primary" onClick={handleFetchWeather} disabled={fetching}>
+          <button className="btn btn-sm btn-secondary" onClick={() => setShowDataInfo(v => !v)} title="What do these scores mean?">
+            <Info size={14} />
+          </button>
+          <button className="btn btn-sm btn-primary" onClick={handleFetchWeather} disabled={fetching || refreshing}>
             <CloudRain size={14} />
             {fetching ? 'Fetching...' : 'Weather'}
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={handleRefreshAll}
+            disabled={refreshing || fetching}
+            style={{
+              background: refreshing ? 'var(--border)' : '#16a34a',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', gap: 4,
+              border: 'none', cursor: refreshing ? 'not-allowed' : 'pointer'
+            }}
+            title="Fetch satellite indices + weather for all farms at once"
+          >
+            {refreshing
+              ? <><div className="spinner" style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%' }} /> Refreshing…</>
+              : <><Zap size={14} /> Refresh All</>}
           </button>
           <button className="btn btn-sm btn-secondary" onClick={load}>
             <RefreshCw size={14} />
@@ -70,7 +108,80 @@ export default function EarlyWarning() {
         </div>
       </div>
 
-      {error && <div className="error-box" style={{ marginBottom: 10 }}><AlertTriangle size={14} /> {error}</div>}
+      {/* Expandable info panel */}
+      {showDataInfo && (
+        <div className="card" style={{ border: '1px solid #fbbf24', background: '#fffbeb' }}>
+          <div className="card-body" style={{ fontSize: 12, lineHeight: 1.7 }}>
+            <strong style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 13 }}>
+              <Info size={13} style={{ color: '#d97706' }} /> Understanding risk scores &amp; data completeness
+            </strong>
+            <p style={{ margin: '0 0 6px' }}>
+              <b>Risk % (0–100)</b> combines three signals: <em>NDVI trend</em> (vegetation decline from
+              satellite), <em>weather-driven disease risk</em> (temperature + humidity + rainfall from
+              Open-Meteo), and <em>crop growth-stage susceptibility.</em> Higher = more estimated risk — not
+              a confirmed disease.
+            </p>
+            <p style={{ margin: '0 0 6px' }}>
+              <b>Why do many farms show the same score?</b> Farms without a satellite scan yet have no NDVI
+              data. Their score comes from weather + growth stage only, so identical-looking farms share
+              similar weather conditions today.
+            </p>
+            <p style={{ margin: '0 0 6px' }}>
+              <b>Why is weather sometimes missing or showing defaults?</b> Weather is fetched from
+              Open-Meteo (free, no API key). If a farm shows placeholder values, no cached WeatherRecord
+              existed for it — this happens when a farm was created without coordinates, or when old records
+              had a missing farm_id. Click <b>Weather</b> or <b>Refresh All</b> to force a fresh fetch.
+            </p>
+            <p style={{ margin: 0 }}>
+              <b>NDVI "insufficient_data"</b> means fewer than 3 scan observations exist. Run scans on
+              at least 3 separate days to enable trend detection.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Refresh result toast */}
+      {refreshResult && (
+        <div style={{
+          padding: '8px 12px', borderRadius: 6, background: '#f0fdf4',
+          border: '1px solid #86efac', fontSize: 12,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8
+        }}>
+          <span>
+            <b>✓ Refresh started —</b> {refreshResult.satellite_tasks_queued} satellite
+            scan{refreshResult.satellite_tasks_queued !== 1 ? 's' : ''} queued,&nbsp;
+            {refreshResult.weather_updated} farm{refreshResult.weather_updated !== 1 ? 's' : ''} got
+            fresh weather data. Results update automatically when processing completes.
+            {refreshResult.farms_without_coords?.length > 0 && (
+              <span style={{ color: '#d97706', display: 'block', marginTop: 3 }}>
+                ⚠ {refreshResult.farms_without_coords.length} farm(s) skipped — no
+                coordinates: {refreshResult.farms_without_coords.map(f => f.name || `Farm ${f.farm_id}`).join(', ')}.
+              </span>
+            )}
+          </span>
+          <button onClick={() => setRefreshResult(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#666', lineHeight: 1 }}>✕</button>
+        </div>
+      )}
+
+      {/* Stale-data warning strip */}
+      {!refreshResult && insufficientCount > 0 && (
+        <div style={{
+          padding: '7px 12px', borderRadius: 6, background: '#fffbeb',
+          border: '1px solid #fcd34d', fontSize: 11,
+          display: 'flex', alignItems: 'center', gap: 8
+        }}>
+          <AlertTriangle size={13} style={{ color: '#d97706', flexShrink: 0 }} />
+          <span>
+            <b>{insufficientCount} farm{insufficientCount !== 1 ? 's' : ''}</b> show estimated scores only —
+            no satellite scan data yet (NDVI: insufficient_data). Click&nbsp;
+            <b style={{ color: '#16a34a', cursor: 'pointer' }} onClick={handleRefreshAll}>Refresh All</b>
+            &nbsp;to fetch satellite indices and weather for every farm at once.
+          </span>
+        </div>
+      )}
+
+      {error && <div className="error-box" style={{ marginBottom: 10, fontSize: 12 }}><AlertTriangle size={14} /> {error}</div>}
 
       {/* Summary Cards */}
       <div className="stats-grid">
